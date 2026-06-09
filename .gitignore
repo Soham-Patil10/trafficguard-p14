@@ -6,3 +6,4 @@ venv/
 node_modules/
 *.pt
 *.pth
+data/Data/MIO-TCD-Localization/

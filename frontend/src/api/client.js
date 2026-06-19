@@ -37,3 +37,10 @@ export const getCertifiedRadius = (sigma) =>
 // Report endpoint
 export const generateReport = (sessionData) =>
   api.post('/report/generate', sessionData, { responseType: 'blob' })
+
+// Defence Lab: defend an already-attacked base64 image
+export const applyDefence = (imageB64, window = 3) =>
+  api.post('/defence/apply', { image: imageB64, window })
+
+// Preset test images for the Attack Lab gallery
+export const getSamples = () => api.get('/samples')

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ShieldCheck, Play, AlertTriangle, ArrowRight } from 'lucide-react'
+import { ShieldCheck, Play, AlertTriangle, ArrowRight, X } from 'lucide-react'
 import { applyDefence } from '../api/client'
 import { useAttack } from '../context/AttackContext'
 import ImagePanel from '../components/ImagePanel'
@@ -15,7 +15,7 @@ const DEFENCE_INFO = {
 const stripDataUrl = (d) => (d && d.includes(',') ? d.split(',')[1] : d)
 
 export default function Defences() {
-  const { lastAttackResult, defences, toggleDef } = useAttack()
+  const { lastAttackResult, setLastAttackResult, defences, toggleDef } = useAttack()
   const [running, setRunning] = useState(false)
   const [windowSize, setWindowSize] = useState(3)
   const [defended, setDefended] = useState(null)
@@ -38,6 +38,13 @@ export default function Defences() {
     } finally {
       setRunning(false)
     }
+  }
+
+  // Clear the image just like the Attack Lab: removes the attacked + defended images.
+  const clearImage = () => {
+    setDefended(null)
+    setError(null)
+    setLastAttackResult(null)
   }
 
   return (
@@ -83,6 +90,12 @@ export default function Defences() {
               >
                 {running ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Play className="w-4 h-4 fill-white" />}
                 {running ? 'Running...' : 'Run Defence'}
+              </button>
+              <button
+                onClick={clearImage}
+                className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-red-400 transition-colors px-2 py-2"
+              >
+                <X className="w-4 h-4" /> Clear
               </button>
             </div>
           </div>

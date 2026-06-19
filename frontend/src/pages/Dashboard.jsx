@@ -18,7 +18,7 @@ export default function Dashboard() {
           title="Clean Accuracy"
           value={metrics.cleanAcc}
           unit="%"
-          sub="target >= 80% · ResNet-50"
+          sub="target >= 80% · ResNet-18"
           color="#34d399"
         />
         <StatCard

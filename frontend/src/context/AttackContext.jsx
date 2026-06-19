@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useCallback } from 'react'
-import { toggleDefence as apiToggleDefence } from '../api/client'
+import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { toggleDefence as apiToggleDefence, getMetrics } from '../api/client'
 
 const AttackContext = createContext(null)
 
@@ -20,11 +20,34 @@ export function AttackProvider({ children }) {
   })
 
   const [metrics, setMetrics] = useState({
-    cleanAcc: 83.4,
-    robustAcc: 61.2,
-    asr: 38.8,
-    certifiedRadius: 0.25,
+    cleanAcc: null,      // filled from the backend (original model accuracy)
+    robustAcc: null,     // N/A until a robustness sweep is run
+    asr: null,           // N/A until computed
+    certifiedRadius: null, // N/A until certified-radius is computed
   })
+
+  // Shared hand-off: the most recent attack result, consumed by the Defence Lab
+  const [lastAttackResult, setLastAttackResult] = useState(null)
+
+  // Live metrics: poll the backend so the StatCards reflect real attack activity.
+  // Falls back silently to the defaults above if the backend isn't running.
+  useEffect(() => {
+    let alive = true
+    const poll = () =>
+      getMetrics()
+        .then((res) => {
+          if (alive && res && res.data) {
+            setMetrics((prev) => ({ ...prev, ...res.data }))
+          }
+        })
+        .catch(() => {})
+    poll()
+    const id = setInterval(poll, 4000)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [])
 
   const toggleAttack = useCallback((name) => {
     setAttacks(prev => ({
@@ -58,7 +81,7 @@ export function AttackProvider({ children }) {
 
   return (
     <AttackContext.Provider
-      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, toggleDef }}
+      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, toggleDef, lastAttackResult, setLastAttackResult }}
     >
       {children}
     </AttackContext.Provider>

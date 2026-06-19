@@ -1,435 +1,341 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { Zap, Play, Upload, ImageIcon, X, ArrowRight } from 'lucide-react'
+import { runFGSM, runPGD, getSamples } from '../api/client'
 import { useAttack } from '../context/AttackContext'
-import { Zap, Play, Loader2, Upload, ImageIcon, X, AlertTriangle, CheckCircle2, ArrowRight } from 'lucide-react'
-import { runFGSM, runPGD } from '../api/client'
+import ImagePanel from '../components/ImagePanel'
 
-const ATTACK_INFO = {
-  fgsm: {
-    desc: 'Fast Gradient Sign Method — single-step gradient-based attack that perturbs pixels in the direction of the loss gradient.',
-    params: ['epsilon'],
+const initialAttacks = [
+  {
+    id: 'fgsm',
+    name: 'FGSM',
+    enabled: true,
+    description:
+      'Fast Gradient Sign Method — single-step gradient-based attack that perturbs pixels in the direction of the loss gradient.',
+    controls: [{ type: 'epsilon', label: 'Epsilon', value: 0.1, min: 0, max: 0.5, step: 0.01 }],
   },
-  pgd: {
-    desc: 'Projected Gradient Descent — iterative version of FGSM that takes multiple small steps, projecting back into the epsilon ball after each step.',
-    params: ['epsilon', 'iterations'],
+  {
+    id: 'pgd',
+    name: 'PGD',
+    enabled: false,
+    description:
+      'Projected Gradient Descent — iterative version of FGSM that takes multiple small steps, projecting back into the epsilon ball after each step.',
+    controls: [
+      { type: 'epsilon', label: 'Epsilon', value: 0.1, min: 0, max: 0.5, step: 0.01 },
+      { type: 'info', label: 'Iterations: 40' },
+    ],
   },
-  labelflip: {
-    desc: 'Label Flipping Poisoning — corrupts a fraction of training labels to degrade model reliability from within.',
-    params: ['rate'],
+  {
+    id: 'labelflip',
+    name: 'LABELFLIP',
+    enabled: false,
+    description:
+      'Label Flipping Poisoning — corrupts a fraction of training labels to degrade model reliability from within.',
+    controls: [{ type: 'info', label: 'Flip rate: 10%' }],
   },
-  backdoor: {
-    desc: 'Backdoor Attack — implants a hidden trigger pattern in training data so the model misclassifies whenever the trigger appears at inference time.',
-    params: [],
+  {
+    id: 'backdoor',
+    name: 'BACKDOOR',
+    enabled: false,
+    description:
+      'Backdoor Attack — implants a hidden trigger pattern in training data so the model misclassifies whenever the trigger appears at inference time.',
+    controls: [],
   },
-}
+]
 
-const PRED_COLORS = {
-  Low: '#34d399',
-  Medium: '#f59e0b',
-  High: '#ef4444',
-}
+const stripDataUrl = (d) => (d && d.includes(',') ? d.split(',')[1] : d)
 
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result.split(',')[1])
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
-
-function fileToDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
-
-function ImagePanel({ label, labelColor, src, pred, conf, placeholder }) {
+function Toggle({ enabled, onChange }) {
   return (
-    <div className="flex-1 min-w-0 rounded-xl overflow-hidden border border-slate-700/40 bg-slate-900/60">
-      {/* label bar */}
-      <div className={`flex items-center gap-1.5 px-3 py-2 border-b border-slate-700/30 ${labelColor}`}>
-        <span className="text-[10px] font-mono font-semibold uppercase tracking-widest">{label}</span>
-      </div>
+    <button
+      onClick={onChange}
+      className={`relative w-12 h-6 rounded-full transition-colors duration-200 focus:outline-none flex-shrink-0 ${
+        enabled ? 'bg-red-500' : 'bg-slate-600'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+          enabled ? 'translate-x-6' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  )
+}
 
-      {/* image area */}
-      <div className="relative flex items-center justify-center h-48 bg-slate-950/40">
-        {src ? (
-          <img src={src} alt={label} className="max-h-48 w-full object-contain" />
-        ) : (
-          <div className="flex flex-col items-center gap-2 text-slate-700">
-            <ImageIcon className="w-8 h-8" />
-            <span className="text-[10px] font-mono">{placeholder}</span>
-          </div>
-        )}
+function AttackCard({ attack, onToggle, onSliderChange }) {
+  return (
+    <div
+      className={`rounded-xl border p-6 flex flex-col gap-4 transition-colors ${
+        attack.enabled ? 'bg-[#1a1f2e] border-slate-600' : 'bg-[#12151f] border-slate-700'
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <span className="font-bold tracking-wide text-white">{attack.name}</span>
+        <Toggle enabled={attack.enabled} onChange={() => onToggle(attack.id)} />
       </div>
+      <p className="text-slate-400 text-sm leading-relaxed">{attack.description}</p>
+      {attack.controls.map((ctrl, i) => {
+        if (ctrl.type === 'epsilon') {
+          return (
+            <div key={i} className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-300">Epsilon</span>
+                <span className="text-red-400 font-mono">{ctrl.value.toFixed(2)}</span>
+              </div>
+              <input
+                type="range"
+                min={ctrl.min}
+                max={ctrl.max}
+                step={ctrl.step}
+                value={ctrl.value}
+                onChange={(e) => onSliderChange(attack.id, i, parseFloat(e.target.value))}
+                className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                style={{
+                  background: `linear-gradient(to right, #ef4444 ${(ctrl.value / ctrl.max) * 100}%, #374151 ${(ctrl.value / ctrl.max) * 100}%)`,
+                }}
+              />
+            </div>
+          )
+        }
+        if (ctrl.type === 'info') {
+          return <p key={i} className="text-slate-500 text-sm">{ctrl.label}</p>
+        }
+        return null
+      })}
+    </div>
+  )
+}
 
-      {/* prediction badge */}
-      <div className="px-3 py-2 border-t border-slate-700/30 min-h-[2rem] flex items-center">
-        {pred ? (
-          <div className="flex items-center gap-2">
-            <span
-              className="text-[11px] font-mono font-bold tracking-wide"
-              style={{ color: PRED_COLORS[pred] ?? '#94a3b8' }}
-            >
-              {pred.toUpperCase()}
-            </span>
-            {conf !== undefined && (
-              <span className="text-[11px] font-mono text-slate-500">{(conf * 100).toFixed(1)}%</span>
-            )}
-          </div>
-        ) : (
-          <span className="text-[10px] font-mono text-slate-700">—</span>
-        )}
+function ImageUploadZone({ onImageLoaded }) {
+  const [dragging, setDragging] = useState(false)
+  const inputRef = useRef()
+
+  const handleFile = (file) => {
+    if (!file || !file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = (e) => onImageLoaded(e.target.result, file.name)
+    reader.readAsDataURL(file)
+  }
+
+  return (
+    <div
+      onClick={() => inputRef.current.click()}
+      onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
+      className={`cursor-pointer border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-3 py-10 transition-colors ${
+        dragging ? 'border-red-400 bg-red-500/10' : 'border-slate-600 hover:border-slate-500 bg-[#12151f]'
+      }`}
+    >
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files[0])} />
+      <div className="w-12 h-12 rounded-full bg-slate-700 flex items-center justify-center">
+        <Upload className="w-5 h-5 text-slate-400" />
+      </div>
+      <div className="text-center">
+        <p className="text-slate-300 font-medium">Drop image here or click to upload</p>
+        <p className="text-slate-500 text-sm mt-1">PNG, JPG, WEBP supported</p>
       </div>
     </div>
   )
 }
 
 export default function AttackLab() {
-  const { attacks, toggleAttack, setEpsilon } = useAttack()
+  const { setLastAttackResult } = useAttack()
+  const [attacks, setAttacks] = useState(initialAttacks)
   const [running, setRunning] = useState(false)
-  const [selectedFile, setSelectedFile] = useState(null)
-  const [previewURL, setPreviewURL] = useState(null)
-  const [dragOver, setDragOver] = useState(false)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState(null)
-  const fileInputRef = useRef(null)
+  const [uploadedImage, setUploadedImage] = useState(null) // dataURL
+  const [fileName, setFileName] = useState('')
+  const [samples, setSamples] = useState([])
+  const [adversarialImage, setAdversarialImage] = useState(null)
+  const [resultInfo, setResultInfo] = useState(null)
 
-  const activeAttack = Object.entries(attacks).find(([, v]) => v.enabled)?.[0] ?? 'fgsm'
-
-  const handleFile = useCallback(async (file) => {
-    if (!file || !file.type.startsWith('image/')) return
-    setSelectedFile(file)
-    setResult(null)
-    setError(null)
-    const url = await fileToDataURL(file)
-    setPreviewURL(url)
+  // Load preset test images from the backend gallery
+  useEffect(() => {
+    getSamples()
+      .then((r) => setSamples(r.data?.samples || []))
+      .catch(() => setSamples([]))
   }, [])
 
-  function handleDrop(e) {
-    e.preventDefault()
-    setDragOver(false)
-    handleFile(e.dataTransfer.files[0])
+  const handleImageLoaded = useCallback((dataUrl, name) => {
+    setUploadedImage(dataUrl)
+    setFileName(name)
+    setAdversarialImage(null)
+    setResultInfo(null)
+  }, [])
+
+  const pickSample = (s) => handleImageLoaded(s.image, s.name)
+
+  const clearImage = () => {
+    setUploadedImage(null); setFileName('')
+    setAdversarialImage(null); setResultInfo(null)
   }
 
-  function handleInputChange(e) {
-    handleFile(e.target.files[0])
-  }
-
-  function clearImage() {
-    setSelectedFile(null)
-    setPreviewURL(null)
-    setResult(null)
-    setError(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  async function handleRunAttack() {
-    if (!selectedFile) return
+  // Attack only: clean image -> adversarial image. Result is handed to the Defence Lab.
+  const runAttack = async () => {
+    if (!uploadedImage) return
     setRunning(true)
-    setError(null)
-    setResult(null)
+    setAdversarialImage(null); setResultInfo(null)
 
     try {
-      const b64 = await fileToBase64(selectedFile)
-      const attack = attacks[activeAttack]
-      let res
+      const enabled = attacks.filter((a) => a.enabled)
+      const usePgd = enabled.some((a) => a.id === 'pgd')
+      const active = enabled.find((a) => a.id === (usePgd ? 'pgd' : 'fgsm')) || enabled[0]
+      const epsCtrl = active?.controls.find((c) => c.type === 'epsilon')
+      const epsilon = epsCtrl ? epsCtrl.value : 0.1
+      const b64 = stripDataUrl(uploadedImage)
 
-      if (activeAttack === 'fgsm') {
-        res = await runFGSM(b64, attack.epsilon)
-      } else if (activeAttack === 'pgd') {
-        res = await runPGD(b64, attack.epsilon, attack.iterations ?? 40)
-      } else {
-        throw new Error(`Attack type "${activeAttack}" requires backend support — no image input needed.`)
-      }
+      const res = usePgd ? await runPGD(b64, epsilon, 40) : await runFGSM(b64, epsilon)
+      const d = res.data
+      const attackImg = `data:image/jpeg;base64,${d.attack_image}`
 
-      setResult(res.data)
+      setAdversarialImage(attackImg)
+      const flipped = d.clean_pred !== d.attack_pred
+      setResultInfo({
+        attackType: usePgd ? 'PGD' : 'FGSM',
+        epsilon: Number(d.epsilon).toFixed(2),
+        flipped,
+        cleanPred: d.clean_pred,
+        cleanConf: (d.clean_conf * 100).toFixed(1),
+        attackPred: d.attack_pred,
+        attackConf: (d.attack_conf * 100).toFixed(1),
+      })
+
+      // Hand off to the Defence Lab via shared context
+      setLastAttackResult({
+        attackImage: attackImg,
+        cleanImage: uploadedImage,
+        cleanPred: d.clean_pred,
+        cleanConf: d.clean_conf,
+        attackPred: d.attack_pred,
+        attackConf: d.attack_conf,
+        epsilon: Number(d.epsilon).toFixed(2),
+        attackType: usePgd ? 'PGD' : 'FGSM',
+        fileName,
+      })
     } catch (e) {
-      setError(e.response?.data?.detail ?? e.message ?? 'Attack failed')
+      setResultInfo({ error: e?.message || 'request failed' })
     } finally {
       setRunning(false)
     }
   }
 
-  const canRun = selectedFile && !running && (activeAttack === 'fgsm' || activeAttack === 'pgd')
+  const toggleAttack = (id) =>
+    setAttacks((prev) => prev.map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a)))
 
-  const cleanSrc = result?.clean_image
-    ? `data:image/jpeg;base64,${result.clean_image}`
-    : previewURL ?? null
-
-  const attackSrc = result?.attack_image
-    ? `data:image/jpeg;base64,${result.attack_image}`
-    : null
-
-  const predFlipped = result?.clean_pred && result?.attack_pred && result.clean_pred !== result.attack_pred
+  const updateSlider = (id, controlIndex, value) =>
+    setAttacks((prev) =>
+      prev.map((a) => {
+        if (a.id !== id) return a
+        return { ...a, controls: a.controls.map((c, i) => (i === controlIndex ? { ...c, value } : c)) }
+      })
+    )
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-red-500/15 border border-red-500/25">
-          <Zap className="w-5 h-5 text-red-400" />
+    <div className="space-y-6">
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 rounded-xl bg-red-500/20 border border-red-500/30 flex items-center justify-center">
+          <Zap className="w-6 h-6 text-red-400" />
         </div>
         <div>
-          <h2 className="text-lg font-bold text-slate-100">Attack Lab</h2>
-          <p className="text-xs text-slate-500">
-            Configure an attack, upload an image, and run it against the traffic classification model
-          </p>
+          <h2 className="text-2xl font-bold">Attack Lab</h2>
+          <p className="text-slate-400 text-sm">Upload or pick a frame, run FGSM/PGD, compare clean vs attacked</p>
         </div>
       </div>
 
-      {/* Attack config cards */}
-      <div className="space-y-3">
-        <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest px-1">
-          Attack Configuration
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-          {Object.entries(ATTACK_INFO).map(([key, info]) => {
-            const attack = attacks[key]
-            if (!attack) return null
-            const isActive = attack.enabled
-            return (
-              <div
-                key={key}
-                className={`rounded-xl border p-4 transition-all duration-300 ${
-                  isActive
-                    ? 'bg-red-500/5 border-red-500/30'
-                    : 'bg-slate-800/60 border-slate-700/40'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-bold text-slate-200 uppercase font-mono tracking-wider">
-                    {key}
-                  </h3>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isActive}
-                      onChange={() => toggleAttack(key)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600" />
-                  </label>
-                </div>
-                <p className="text-xs text-slate-400 leading-relaxed mb-3">
-                  {info.desc}
-                </p>
-                {info.params.includes('epsilon') && (
-                  <div className="mb-2">
-                    <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 mb-1">
-                      <span>Epsilon</span>
-                      <span className="text-red-400">{attack.epsilon.toFixed(2)}</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.01"
-                      max="0.50"
-                      step="0.01"
-                      value={attack.epsilon}
-                      onChange={e => setEpsilon(key, parseFloat(e.target.value))}
-                      className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-red-500"
-                    />
-                    <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-0.5">
-                      <span>0.01</span><span>0.25</span><span>0.50</span>
-                    </div>
-                  </div>
-                )}
-                {info.params.includes('iterations') && attack.iterations !== undefined && (
-                  <div className="text-[11px] font-mono text-slate-500 mt-1">
-                    Iterations: <span className="text-slate-300">{attack.iterations}</span>
-                  </div>
-                )}
-                {info.params.includes('rate') && attack.rate !== undefined && (
-                  <div className="text-[11px] font-mono text-slate-500 mt-1">
-                    Flip rate: <span className="text-slate-300">{attack.rate}%</span>
-                  </div>
-                )}
-                {(key === 'labelflip' || key === 'backdoor') && (
-                  <div className="mt-2 text-[10px] font-mono text-slate-600 px-2 py-1 bg-slate-700/30 rounded leading-relaxed">
-                    Poisoning — no image input needed
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Image row — input | arrow | result */}
-      <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl p-4 space-y-3">
-        <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
-          Image Comparison
+      <div className="bg-[#12151f] border border-slate-700 rounded-xl p-6 space-y-5">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-white">Target Image</h3>
+          {uploadedImage && (
+            <button onClick={clearImage} className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-red-400 transition-colors">
+              <X className="w-4 h-4" /> Clear
+            </button>
+          )}
         </div>
 
-        <div className="flex items-stretch gap-3">
-          {/* Input image */}
-          <div className="flex-1 min-w-0 rounded-xl overflow-hidden border border-slate-700/40 bg-slate-900/60">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700/30 bg-slate-800/40">
-              <span className="text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-400">
-                Input
-              </span>
-              {previewURL && (
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-300 transition-colors"
-                    title="Replace"
-                  >
-                    <ImageIcon className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={clearImage}
-                    className="p-1 rounded hover:bg-red-900/40 text-slate-500 hover:text-red-400 transition-colors"
-                    title="Remove"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
+        {/* Preset test-image gallery */}
+        {samples.length > 0 && (
+          <div>
+            <p className="text-xs text-slate-500 mb-2">Or pick a test image:</p>
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {samples.map((s) => (
+                <button
+                  key={s.name}
+                  onClick={() => pickSample(s)}
+                  className={`flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 transition-colors ${
+                    fileName === s.name ? 'border-red-400' : 'border-slate-700 hover:border-slate-500'
+                  }`}
+                  title={s.name}
+                >
+                  <img src={s.image} alt={s.name} className="w-full h-full object-cover" />
+                </button>
+              ))}
             </div>
-
-            {!previewURL ? (
-              <div
-                onDrop={handleDrop}
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-                onDragLeave={() => setDragOver(false)}
-                onClick={() => fileInputRef.current?.click()}
-                className={`flex flex-col items-center justify-center h-48 cursor-pointer transition-all duration-200 ${
-                  dragOver
-                    ? 'bg-red-500/8'
-                    : 'hover:bg-slate-800/40'
-                }`}
-                style={{ border: dragOver ? '2px dashed rgba(248,113,113,0.5)' : '2px dashed transparent' }}
-              >
-                <div className="flex flex-col items-center gap-2 pointer-events-none">
-                  <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center">
-                    <Upload className="w-5 h-5 text-slate-500" />
-                  </div>
-                  <span className="text-xs text-slate-500 font-medium">Drop or click to upload</span>
-                  <span className="text-[10px] text-slate-600">PNG · JPG · WEBP</span>
-                </div>
-              </div>
-            ) : (
-              <div className="relative flex items-center justify-center h-48 bg-slate-950/40">
-                <img src={previewURL} alt="Input" className="max-h-48 w-full object-contain" />
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-slate-950/80 to-transparent px-2 py-1.5">
-                  <span className="text-[10px] font-mono text-slate-500 truncate block">{selectedFile?.name}</span>
-                </div>
-              </div>
-            )}
-
-            <div className="px-3 py-2 border-t border-slate-700/30 min-h-[2rem] flex items-center">
-              <span className="text-[10px] font-mono text-slate-600">
-                {previewURL ? 'Ready' : 'No image selected'}
-              </span>
-            </div>
-          </div>
-
-          {/* Arrow divider */}
-          <div className="flex flex-col items-center justify-center gap-1 shrink-0 pt-10">
-            <div className={`p-2 rounded-full border transition-all duration-300 ${
-              running
-                ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                : result
-                ? 'bg-slate-700/50 border-slate-600/40 text-slate-400'
-                : 'bg-slate-800/60 border-slate-700/30 text-slate-600'
-            }`}>
-              {running
-                ? <Loader2 className="w-4 h-4 animate-spin" />
-                : <ArrowRight className="w-4 h-4" />
-              }
-            </div>
-            {running && (
-              <span className="text-[9px] font-mono text-red-400 whitespace-nowrap">attacking</span>
-            )}
-          </div>
-
-          {/* Result image */}
-          <ImagePanel
-            label="Adversarial"
-            labelColor="bg-red-500/8 text-red-400"
-            src={attackSrc}
-            pred={result?.attack_pred}
-            conf={result?.attack_conf}
-            placeholder={running ? 'computing...' : 'run attack to see result'}
-          />
-        </div>
-
-        {/* Status banner */}
-        {(error || predFlipped || (result?.clean_pred && result?.attack_pred && !predFlipped)) && (
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-mono border ${
-            error
-              ? 'bg-red-500/8 border-red-500/20 text-red-400'
-              : predFlipped
-              ? 'bg-red-500/8 border-red-500/20 text-red-400'
-              : 'bg-emerald-500/8 border-emerald-500/20 text-emerald-400'
-          }`}>
-            {error ? (
-              <><AlertTriangle className="w-3.5 h-3.5 shrink-0" />{error}</>
-            ) : predFlipped ? (
-              <><AlertTriangle className="w-3.5 h-3.5 shrink-0" />PREDICTION FLIPPED: {result.clean_pred.toUpperCase()} → {result.attack_pred.toUpperCase()}</>
-            ) : (
-              <><CheckCircle2 className="w-3.5 h-3.5 shrink-0" />PREDICTION HELD: model defended — {result?.clean_pred?.toUpperCase()}</>
-            )}
           </div>
         )}
 
-        {/* Metrics row */}
-        {result?.asr !== undefined && (
-          <div className="flex items-center gap-6 px-1">
-            <div className="text-[11px] font-mono">
-              <span className="text-slate-500">ASR </span>
-              <span className="text-red-400 font-bold">{result.asr.toFixed(1)}%</span>
+        {!uploadedImage ? (
+          <ImageUploadZone onImageLoaded={handleImageLoaded} />
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm text-slate-400 bg-slate-800 rounded-lg px-3 py-2">
+              <ImageIcon className="w-4 h-4" />
+              <span className="truncate">{fileName}</span>
             </div>
-            {result.perturbation_norm !== undefined && (
-              <div className="text-[11px] font-mono">
-                <span className="text-slate-500">‖δ‖₂ </span>
-                <span className="text-sky-400 font-bold">{result.perturbation_norm.toFixed(4)}</span>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <ImagePanel label="Before — Clean" src={uploadedImage} badge="Clean" badgeColor="bg-blue-500/20 text-blue-400"
+                sub={resultInfo && !resultInfo.error ? `${resultInfo.cleanPred} · ${resultInfo.cleanConf}%` : null} />
+              <ImagePanel label="After — Attacked" src={adversarialImage} badge={adversarialImage ? 'Perturbed' : null} badgeColor="bg-red-500/20 text-red-400"
+                sub={resultInfo && !resultInfo.error ? `${resultInfo.attackPred} · ${resultInfo.attackConf}%` : null} />
+            </div>
+
+            {resultInfo && resultInfo.error && (
+              <div className="rounded-lg p-4 border bg-red-500/10 border-red-500/30 text-sm text-red-400">
+                Could not reach the backend ({resultInfo.error}). Is uvicorn running on http://localhost:8000?
               </div>
+            )}
+
+            {resultInfo && !resultInfo.error && (
+              <>
+                <div className={`rounded-lg p-4 border text-sm ${
+                  resultInfo.flipped ? 'bg-red-500/10 border-red-500/30 text-red-300' : 'bg-slate-700/30 border-slate-600 text-slate-300'
+                }`}>
+                  <p className="font-semibold">
+                    {resultInfo.flipped ? 'Attack changed the prediction' : 'Attack did not change the prediction'}
+                  </p>
+                  <p className="text-slate-400 mt-1">
+                    {resultInfo.cleanPred} ({resultInfo.cleanConf}%) → <span className="text-red-300">{resultInfo.attackPred}</span> ({resultInfo.attackConf}%)
+                    &nbsp;·&nbsp; {resultInfo.attackType} &nbsp;·&nbsp; ε = <span className="font-mono">{resultInfo.epsilon}</span>
+                  </p>
+                </div>
+                <div className="rounded-lg p-3 border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-300 flex items-center gap-2">
+                  <ArrowRight className="w-4 h-4" />
+                  Attacked image sent to the Defence Lab — open that tab to run the defence.
+                </div>
+              </>
             )}
           </div>
         )}
       </div>
 
-      {/* Run button row */}
-      <div className="flex items-center gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {attacks.map((attack) => (
+          <AttackCard key={attack.id} attack={attack} onToggle={toggleAttack} onSliderChange={updateSlider} />
+        ))}
+      </div>
+
+      <div className="flex items-center gap-4 pt-2">
         <button
-          onClick={handleRunAttack}
-          disabled={!canRun}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-            canRun
-              ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/30'
-              : 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
-          }`}
+          onClick={runAttack}
+          disabled={running || !attacks.some((a) => a.enabled) || !uploadedImage}
+          className="flex items-center gap-2 bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold px-6 py-3 rounded-lg transition-colors"
         >
-          {running
-            ? <Loader2 className="w-4 h-4 animate-spin" />
-            : <Play className="w-4 h-4" />
-          }
-          {running ? 'Running Attack...' : 'Run Attack'}
+          {running ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Play className="w-4 h-4 fill-white" />}
+          {running ? 'Running...' : 'Run Attack'}
         </button>
-        {!selectedFile && (
-          <span className="text-xs text-slate-500">Upload an image above to enable</span>
-        )}
-        {selectedFile && !canRun && !running && (
-          <span className="text-xs text-slate-500">
-            {activeAttack === 'labelflip' || activeAttack === 'backdoor'
-              ? 'Select FGSM or PGD for image-based attacks'
-              : 'Enable an attack above'}
-          </span>
-        )}
+        <span className="text-slate-500 text-sm">
+          {!uploadedImage ? 'Upload or pick a test image to run attacks' : 'Runs FGSM/PGD on the backend'}
+        </span>
       </div>
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleInputChange}
-      />
     </div>
   )
 }

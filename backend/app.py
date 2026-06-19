@@ -66,14 +66,28 @@ def _record(flip: int):
     METRICS["flips"] += int(flip)
 
 
-def _live_metrics() -> dict:
-    """Clean accuracy = the trained model's own accuracy. The rest are reported as
-    N/A (null) until they're actually computed against a test set, rather than
-    showing fabricated rolling numbers."""
+def _model_accuracy():
+    """Clean accuracy = the trained model's own validation accuracy.
+    Prefer the loaded checkpoint's val_acc; fall back to the best value in the
+    training log so the dashboard shows a real number even before best.pt loads."""
     meta = ml.model_meta()
-    clean = meta["val_acc"] if meta.get("checkpoint_loaded") and meta.get("val_acc") else None
+    if meta.get("checkpoint_loaded") and meta.get("val_acc"):
+        return round(meta["val_acc"], 1)
+    log = BASE_DIR / "model" / "checkpoints" / "train_log.csv"
+    try:
+        import csv
+        rows = list(csv.DictReader(open(log)))
+        best = max(float(r["val_acc"]) for r in rows if r.get("val_acc"))
+        return round(best * 100, 1)
+    except Exception:
+        return None
+
+
+def _live_metrics() -> dict:
+    """Clean accuracy is the real model accuracy. The other three are reported as
+    N/A (null) until actually computed against a test set."""
     return {
-        "cleanAcc": clean,
+        "cleanAcc": _model_accuracy(),
         "robustAcc": None,
         "asr": None,
         "certifiedRadius": None,

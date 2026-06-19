@@ -26,7 +26,7 @@ export default function ModelPage() {
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-slate-400">Model</span>
-              <span className="text-slate-200 font-mono">ResNet-50</span>
+              <span className="text-slate-200 font-mono">ResNet-18</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Task</span>

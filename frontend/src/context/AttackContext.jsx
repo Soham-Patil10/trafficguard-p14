@@ -29,6 +29,10 @@ export function AttackProvider({ children }) {
   // Shared hand-off: the most recent attack result, consumed by the Defence Lab
   const [lastAttackResult, setLastAttackResult] = useState(null)
 
+  // Persistent Attack Lab input: the uploaded/selected clean image. Lives in
+  // context so it survives page switches and only clears when the user clears it.
+  const [cleanInput, setCleanInput] = useState(null) // { image, name } | null
+
   // Live metrics: poll the backend so the StatCards reflect real attack activity.
   // Falls back silently to the defaults above if the backend isn't running.
   useEffect(() => {
@@ -81,7 +85,7 @@ export function AttackProvider({ children }) {
 
   return (
     <AttackContext.Provider
-      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, toggleDef, lastAttackResult, setLastAttackResult }}
+      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, toggleDef, lastAttackResult, setLastAttackResult, cleanInput, setCleanInput }}
     >
       {children}
     </AttackContext.Provider>

@@ -346,7 +346,7 @@ export default function StatCard({ title, value, unit = '', sub, delta, deltaDir
   //  title    — small uppercase label e.g. "Clean Accuracy"
   //  value    — the big number e.g. 83.4
   //  unit     — suffix e.g. "%"
-  //  sub      — small subtitle e.g. "target ≥ 80% · ResNet-50"
+  //  sub      — small subtitle e.g. "target ≥ 80% · ResNet-18"
   //  delta    — change badge e.g. "+18.4% defended"
   //  deltaDir — 'up' | 'down' (up = bad for ASR, good for accuracy)
   //  color    — CSS var for the value text
@@ -786,7 +786,7 @@ export default function Dashboard() {
 
       {/* Row 1 — Stat cards */}
       <div className="row row-4">
-        <StatCard title="Clean Accuracy"   value={metrics.cleanAcc}       unit="%" sub="target ≥ 80% · ResNet-50"       color="var(--green)"/>
+        <StatCard title="Clean Accuracy"   value={metrics.cleanAcc}       unit="%" sub="target ≥ 80% · ResNet-18"       color="var(--green)"/>
         <StatCard title="Robust Accuracy"  value={metrics.robustAcc}      unit="%" sub="under active attack"             color="var(--amber)"/>
         <StatCard title="Attack Success"   value={metrics.asr}            unit="%" sub="frames flipped by active attack" color="var(--red)"/>
         <StatCard title="Certified Radius" value={metrics.certifiedRadius} sub="σ=0.25 · Randomized Smoothing · ℓ₂"    color="var(--purple)"/>

@@ -8,6 +8,7 @@ export default function ReportPage() {
   const { metrics, attacks, defences } = useAttack()
   const { frameHistory } = useStream()
   const [generating, setGenerating] = useState(false)
+  const na = (v, u = '') => (v === null || v === undefined ? 'N/A' : `${v}${u}`)
 
   async function handleGenerateReport() {
     setGenerating(true)
@@ -70,19 +71,19 @@ export default function ReportPage() {
           <div className="space-y-3">
             <div className="flex justify-between text-sm">
               <span className="text-slate-400">Clean Accuracy</span>
-              <span className="text-emerald-400 font-mono font-bold">{metrics.cleanAcc}%</span>
+              <span className="text-emerald-400 font-mono font-bold">{na(metrics.cleanAcc, '%')}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-slate-400">Robust Accuracy</span>
-              <span className="text-amber-400 font-mono font-bold">{metrics.robustAcc}%</span>
+              <span className="text-amber-400 font-mono font-bold">{na(metrics.robustAcc, '%')}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-slate-400">Attack Success Rate</span>
-              <span className="text-red-400 font-mono font-bold">{metrics.asr}%</span>
+              <span className="text-red-400 font-mono font-bold">{na(metrics.asr, '%')}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-slate-400">Certified Radius</span>
-              <span className="text-sky-400 font-mono font-bold">{metrics.certifiedRadius}</span>
+              <span className="text-sky-400 font-mono font-bold">{na(metrics.certifiedRadius)}</span>
             </div>
           </div>
         </div>

@@ -227,6 +227,50 @@ def run_fgsm(image: Image.Image, epsilon: float = 0.1) -> dict:
     }
 
 
+# ── PGD attack ───────────────────────────────────────────────────────────────
+def run_pgd(image: Image.Image, epsilon: float = 0.1, steps: int = 40, alpha: float | None = None) -> dict:
+    """Projected Gradient Descent attack (Madry et al., 2018).
+
+    Iterative FGSM where each step is projected back into the L-inf epsilon
+    ball around the clean image, making it strictly stronger than single-step
+    FGSM at the same epsilon.
+    """
+    if alpha is None:
+        alpha = epsilon / 10
+
+    x_clean = _pil_to_pixels(image)
+    clean   = _predict_pixels(x_clean)
+    x_adv   = x_clean.clone().detach()
+    target  = torch.tensor([clean["idx"]]).to(DEVICE)
+
+    for _ in range(steps):
+        x_adv.requires_grad_(True)
+        loss = F.cross_entropy(get_model()(x_adv), target)
+        get_model().zero_grad(set_to_none=True)
+        loss.backward()
+        assert x_adv.grad is not None, "PGD: no gradient computed"
+        with torch.no_grad():
+            x_adv = x_adv + alpha * x_adv.grad.sign()
+            delta = (x_adv - x_clean).clamp(-epsilon, epsilon)
+            x_adv = (x_clean + delta).clamp(0, 1).detach()
+
+    attacked = _predict_pixels(x_adv)
+    return {
+        "clean_pred":   clean["label"],
+        "attack_pred":  attacked["label"],
+        "clean_conf":   clean["confidence"],
+        "attack_conf":  attacked["confidence"],
+        "asr":          int(clean["idx"] != attacked["idx"]),
+        "epsilon":      float(epsilon),
+        "steps":        steps,
+        "clean_probs":  clean["probs"],
+        "attack_probs": attacked["probs"],
+        "clean_image":  _pixels_to_b64(x_clean),
+        "attack_image": _pixels_to_b64(x_adv),
+        "_x_adv":       x_adv,
+    }
+
+
 # ── Spatial-smoothing defence ────────────────────────────────────────────────
 def _median_smooth(x: torch.Tensor, window: int = SMOOTH_WINDOW) -> torch.Tensor:
     """Apply a median filter (the core of ART's SpatialSmoothing) to a [0,1] image."""

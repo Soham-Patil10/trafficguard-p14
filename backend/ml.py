@@ -127,8 +127,19 @@ def load_model(checkpoint_path: Path | str) -> bool:
             try:
                 model.load_state_dict(state)
             except Exception:
-                model.backbone.load_state_dict(state)
-        real = True
+                try:
+                    model.backbone.load_state_dict(state)
+                except Exception as e:
+                    print(f"[TrafficGuard] ERROR: checkpoint weights could not be loaded: {e}")
+                    print("[TrafficGuard] Running with random weights — predictions will be meaningless.")
+                    _meta["loaded"] = False
+                    real = False
+                else:
+                    real = True
+            else:
+                real = True
+        else:
+            real = True
     else:
         _meta = {"epoch": "untrained", "val_acc": 0.0, "loaded": False}
         real = False

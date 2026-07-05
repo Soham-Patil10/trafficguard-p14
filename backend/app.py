@@ -115,14 +115,13 @@ async def attack_fgsm(payload: dict = Body(...)):
 
 @app.post("/attack/pgd")
 async def attack_pgd(payload: dict = Body(...)):
-    # Lightweight stand-in: PGD is iterative FGSM. We expose the same contract so
-    # the frontend works; swap in a true multi-step routine in ml.py if needed.
     try:
         image = _b64_to_pil(payload["image"])
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"bad image: {e}"})
-    eps = float(payload.get("epsilon", 0.1))
-    r = ml.run_fgsm(image, eps)
+    eps   = float(payload.get("epsilon", 0.1))
+    steps = int(payload.get("iterations", 40))
+    r = ml.run_pgd(image, eps, steps)
     _record(r["asr"])
     r.pop("_x_adv", None)
     r["attack_type"] = "PGD"
@@ -337,7 +336,7 @@ async def ws_stream(websocket: WebSocket):
             eps = STREAM_CTRL["epsilon"]
             on = STREAM_CTRL["attack_enabled"]
 
-            # torch inference is blocking — run it off the event loop
+            # torch inference is blocking run it off the event loop
             r = await loop.run_in_executor(None, lambda: ml.run_fgsm(image, eps))
             r.pop("_x_adv", None)
             _record(r["asr"] if on else 0)

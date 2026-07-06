@@ -81,11 +81,17 @@ def _live_metrics() -> dict:
     }
 
 
+_FRAMES: list[str] = []
+
+
 @app.on_event("startup")
 def _startup():
+    global _FRAMES
     real = ml.load_model(CHECKPOINT_PATH)
     print(f"[TrafficGuard] checkpoint loaded: {real}  ({CHECKPOINT_PATH})")
     print(f"[TrafficGuard] frames dir: {FRAMES_DIR}  exists={FRAMES_DIR.exists()}")
+    _FRAMES = _list_frames()
+    print(f"[TrafficGuard] cached {len(_FRAMES)} sample frames")
 
 
 # ── Model endpoints ───────────────────────────────────────────────────────────
@@ -325,7 +331,7 @@ async def ws_stream(websocket: WebSocket):
 
     try:
         for frame_id in itertools.count(1):
-            frames = _list_frames()
+            frames = _FRAMES
             if not frames:
                 await websocket.send_json({
                     "type": "frame", "frame_id": frame_id,

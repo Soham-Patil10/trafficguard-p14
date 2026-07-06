@@ -183,8 +183,9 @@ async def defence_apply(payload: dict = Body(...)):
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"bad image: {e}"})
     window = int(payload.get("window", 3))
+    smooth = DEFENCES["smooth"]
     loop = asyncio.get_running_loop()
-    d = await loop.run_in_executor(None, lambda: ml.defend_pil(image, window))
+    d = await loop.run_in_executor(None, lambda: ml.defend_pil(image, window, smooth))
     return {
         "defended_pred":  d["defended_pred"],
         "defended_conf":  d["defended_conf"],

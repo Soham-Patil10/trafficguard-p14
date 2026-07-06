@@ -294,11 +294,22 @@ def predict_with_defence(x_adv: torch.Tensor, window: int = SMOOTH_WINDOW) -> di
     }
 
 
-def defend_pil(image: Image.Image, window: int = SMOOTH_WINDOW) -> dict:
+def defend_pil(image: Image.Image, window: int = SMOOTH_WINDOW, smooth: bool = True) -> dict:
     """Apply the spatial-smoothing defence to an arbitrary (already-attacked) image.
 
     Used by the Defence Lab: it receives the attacked image produced by the
     Attack Lab and returns the defended prediction + smoothed image.
+    When smooth=False the median filter is skipped and inference runs on the
+    raw image, reflecting the user having toggled the defence off.
     """
     x = _pil_to_pixels(image)
-    return predict_with_defence(x, window)
+    if smooth:
+        return predict_with_defence(x, window)
+    pred = _predict_pixels(x)
+    return {
+        "defended_pred":  pred["label"],
+        "defended_idx":   pred["idx"],
+        "defended_conf":  pred["confidence"],
+        "defended_probs": pred["probs"],
+        "defended_image": _pixels_to_b64(x),
+    }

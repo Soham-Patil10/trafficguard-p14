@@ -292,9 +292,14 @@ async def root():
 
 # ── WebSocket live stream (drives FrameComparison / History / Log / LIVE badge) ─
 def _list_frames():
+    seen = set()
     files = []
-    for ext in ("*.jpg", "*.jpeg", "*.png", "*.JPG", "*.PNG"):
-        files.extend(sorted(glob.glob(str(FRAMES_DIR / ext))))
+    for ext in ("*.jpg", "*.jpeg", "*.png"):
+        for path in sorted(glob.glob(str(FRAMES_DIR / ext))):
+            key = path.lower()
+            if key not in seen:
+                seen.add(key)
+                files.append(path)
     return files
 
 

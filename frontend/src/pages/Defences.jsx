@@ -73,16 +73,6 @@ export default function Defences() {
               &nbsp;·&nbsp; {lastAttackResult.attackType} &nbsp;·&nbsp; ε = <span className="font-mono">{lastAttackResult.epsilon}</span>
             </div>
             <div className="flex items-center gap-3">
-              <label className="text-sm text-slate-400">Smoothing window</label>
-              <select
-                value={windowSize}
-                onChange={(e) => setWindowSize(parseInt(e.target.value))}
-                className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200"
-              >
-                <option value={3}>3 × 3</option>
-                <option value={5}>5 × 5</option>
-                <option value={7}>7 × 7</option>
-              </select>
               <button
                 onClick={runDefence}
                 disabled={running}
@@ -146,10 +136,23 @@ export default function Defences() {
               <div key={key} className={`rounded-xl border p-4 transition-all ${defence.enabled ? 'bg-emerald-500/5 border-emerald-500/25' : 'bg-slate-800/60 border-slate-700/40'}`}>
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-sm font-bold text-slate-200 uppercase font-mono">{key}</h4>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" checked={defence.enabled} onChange={() => toggleDef(key)} className="sr-only peer" />
-                    <div className="w-9 h-5 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600" />
-                  </label>
+                  <div className="flex items-center gap-2">
+                    {key === 'smooth' && (
+                      <select
+                        value={windowSize}
+                        onChange={(e) => setWindowSize(parseInt(e.target.value))}
+                        className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-slate-200"
+                      >
+                        <option value={3}>3 × 3</option>
+                        <option value={5}>5 × 5</option>
+                        <option value={7}>7 × 7</option>
+                      </select>
+                    )}
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" checked={defence.enabled} onChange={() => toggleDef(key)} className="sr-only peer" />
+                      <div className="w-9 h-5 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600" />
+                    </label>
+                  </div>
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed mb-2">{info.desc}</p>
                 <p className="text-[10px] text-slate-600 font-mono">Ref: {info.paper}</p>

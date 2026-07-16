@@ -35,6 +35,7 @@ import ml   # all torch lives here
 # ── Paths (portable; relative to the repo) ────────────────────────────────────
 BASE_DIR        = Path(__file__).resolve().parent.parent
 CHECKPOINT_PATH = Path(os.environ.get("TG_CHECKPOINT", BASE_DIR / "model" / "checkpoints" / "best.pt"))
+POISONED_PATH   = Path(os.environ.get("TG_POISONED", BASE_DIR / "model" / "checkpoints" / "poisoned.pt"))
 FRAMES_DIR      = Path(os.environ.get("TG_FRAMES", BASE_DIR / "data" / "sample_frames"))
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -89,6 +90,8 @@ def _startup():
     global _FRAMES
     real = ml.load_model(CHECKPOINT_PATH)
     print(f"[TrafficGuard] checkpoint loaded: {real}  ({CHECKPOINT_PATH})")
+    poisoned = ml.load_poisoned_model(POISONED_PATH)
+    print(f"[TrafficGuard] poisoned model loaded: {poisoned}  ({POISONED_PATH})")
     print(f"[TrafficGuard] frames dir: {FRAMES_DIR}  exists={FRAMES_DIR.exists()}")
     _FRAMES = _list_frames()
     print(f"[TrafficGuard] cached {len(_FRAMES)} sample frames")
@@ -103,6 +106,33 @@ async def model_info():
 @app.get("/model/metrics")
 async def model_metrics():
     return _live_metrics()
+
+
+# ── Model comparison (clean vs poisoned) ──────────────────────────────────────
+@app.get("/compare/status")
+async def compare_status():
+    """Whether a poisoned model is available for side-by-side comparison."""
+    return {"clean": ml.model_meta(), "poisoned": ml.poisoned_meta()}
+
+
+@app.post("/compare/models")
+async def compare_models(payload: dict = Body(...)):
+    """Run one uploaded image through both the clean and poisoned models."""
+    try:
+        image = _b64_to_pil(payload["image"])
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"bad image: {e}"})
+    loop = asyncio.get_running_loop()
+    r = await loop.run_in_executor(None, lambda: ml.compare_pil(image))
+    return {
+        "clean_pred":     r["clean"]["label"],
+        "clean_conf":     r["clean"]["confidence"],
+        "poisoned_pred":  r["poisoned"]["label"]      if r["poisoned"] else None,
+        "poisoned_conf":  r["poisoned"]["confidence"] if r["poisoned"] else None,
+        "disagree":       bool(r["poisoned"] and r["clean"]["idx"] != r["poisoned"]["idx"]),
+        "poisoned_loaded": r["poisoned"] is not None,
+        "image":          r["image_b64"],
+    }
 
 
 # ── Attack endpoints ──────────────────────────────────────────────────────────

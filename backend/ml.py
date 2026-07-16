@@ -37,8 +37,10 @@ DEVICE        = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SMOOTH_WINDOW = 3  # spatial-smoothing median window (matches ART SpatialSmoothing)
 
 # ── Module-level cache ────────────────────────────────────────────────────────
-_model = None          # NormalizedResNet in eval() mode
+_model = None          # NormalizedResNet in eval() mode (clean model)
 _meta = {}             # checkpoint metadata
+_poisoned_model = None # NormalizedResNet in eval() mode (label-flipped model)
+_poisoned_meta = {}    # poisoned checkpoint metadata
 
 
 # ── Model definition ──────────────────────────────────────────────────────────
@@ -169,10 +171,69 @@ def model_meta() -> dict:
     }
 
 
+# ── Poisoned (label-flipped) model for side-by-side comparison ────────────────
+def _load_state_flexible(model: NormalizedResNet, state: dict) -> None:
+    """Load a state dict into either the wrapper or the bare backbone."""
+    try:
+        model.load_state_dict(state)
+    except Exception:
+        model.backbone.load_state_dict(state)
+
+
+def load_poisoned_model(checkpoint_path: Path | str) -> bool:
+    """Load a second, label-flipped model into a separate slot.
+
+    Handles the label-flip notebook's whole-module save (a plain ResNet18 saved
+    via torch.save(model)) by copying its weights into a NormalizedResNet backbone
+    so it runs in the same [0,1] pixel space as the clean model. Returns True if
+    real weights were loaded, False if the checkpoint is missing or unreadable.
+    """
+    global _poisoned_model, _poisoned_meta
+    checkpoint_path = Path(checkpoint_path)
+    if not checkpoint_path.exists():
+        _poisoned_model = None
+        _poisoned_meta = {"epoch": "missing", "val_acc": 0.0, "loaded": False}
+        return False
+
+    model = NormalizedResNet(num_classes=3).to(DEVICE)
+    ckpt = torch.load(checkpoint_path, map_location=DEVICE, weights_only=False)
+    meta = {"epoch": "?", "val_acc": 0.0, "loaded": True}
+    try:
+        if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+            meta["epoch"] = ckpt.get("epoch", "?")
+            meta["val_acc"] = float(ckpt.get("val_acc", 0.0))
+            _load_state_flexible(model, ckpt["model_state_dict"])
+        elif isinstance(ckpt, dict):
+            _load_state_flexible(model, ckpt)
+        elif isinstance(ckpt, NormalizedResNet):
+            model = ckpt.to(DEVICE)
+        else:  # a plain nn.Module (e.g. the notebook's torch.save(resnet18))
+            model.backbone.load_state_dict(ckpt.state_dict())
+    except Exception as e:
+        print(f"[TrafficGuard] ERROR: poisoned checkpoint could not be loaded: {e}")
+        _poisoned_model = None
+        _poisoned_meta = {"epoch": "?", "val_acc": 0.0, "loaded": False}
+        return False
+
+    model.eval()
+    _poisoned_model = model
+    _poisoned_meta = meta
+    return True
+
+
+def poisoned_meta() -> dict:
+    return {
+        "checkpoint_loaded": _poisoned_meta.get("loaded", False),
+        "epoch": _poisoned_meta.get("epoch"),
+        "val_acc": round(_poisoned_meta.get("val_acc", 0.0) * 100, 2),
+    }
+
+
 # ── Inference ─────────────────────────────────────────────────────────────────
-def _predict_pixels(x: torch.Tensor) -> dict:
+def _predict_pixels(x: torch.Tensor, model: "NormalizedResNet | None" = None) -> dict:
+    m = model if model is not None else get_model()
     with torch.no_grad():
-        logits = get_model()(x)
+        logits = m(x)
     probs = _softmax_np(logits.cpu().numpy()[0])
     idx = int(probs.argmax())
     return {
@@ -185,6 +246,22 @@ def _predict_pixels(x: torch.Tensor) -> dict:
 
 def predict_pil(image: Image.Image) -> dict:
     return _predict_pixels(_pil_to_pixels(image))
+
+
+def compare_pil(image: Image.Image) -> dict:
+    """Predict the same image through the clean model and the poisoned model.
+
+    Returns both predictions plus the (resized) input image. The 'poisoned' entry
+    is None when no poisoned checkpoint has been loaded.
+    """
+    x = _pil_to_pixels(image)
+    clean = _predict_pixels(x)
+    poisoned = _predict_pixels(x, _poisoned_model) if _poisoned_model is not None else None
+    return {
+        "clean":     clean,
+        "poisoned":  poisoned,
+        "image_b64": _pixels_to_b64(x),
+    }
 
 
 # ── FGSM attack ───────────────────────────────────────────────────────────────

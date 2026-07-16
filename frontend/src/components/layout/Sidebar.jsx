@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Zap,
   ShieldCheck,
+  GitCompare,
   Brain,
   FileText,
 } from 'lucide-react'
@@ -14,6 +15,7 @@ const NAV_ITEMS = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/attacks', icon: Zap, label: 'Attack Lab' },
   { to: '/defences', icon: ShieldCheck, label: 'Defences' },
+  { to: '/compare', icon: GitCompare, label: 'Model Compare' },
   { to: '/model', icon: Brain, label: 'Model' },
   { to: '/report', icon: FileText, label: 'Report' },
 ]

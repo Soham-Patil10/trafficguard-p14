@@ -6,6 +6,7 @@ import Sidebar from './components/layout/Sidebar'
 import Dashboard from './pages/Dashboard'
 import AttackLab from './pages/AttackLab'
 import Defences from './pages/Defences'
+import Comparison from './pages/Comparison'
 import ModelPage from './pages/Model'
 import ReportPage from './pages/Report'
 
@@ -22,6 +23,7 @@ export default function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/attacks" element={<AttackLab />} />
                 <Route path="/defences" element={<Defences />} />
+                <Route path="/compare" element={<Comparison />} />
                 <Route path="/model" element={<ModelPage />} />
                 <Route path="/report" element={<ReportPage />} />
               </Routes>

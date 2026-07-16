@@ -44,3 +44,8 @@ export const applyDefence = (imageB64, window = 3) =>
 
 // Preset test images for the Attack Lab gallery
 export const getSamples = () => api.get('/samples')
+
+// Model comparison: clean vs poisoned (label-flipped) model on one image
+export const getCompareStatus = () => api.get('/compare/status')
+export const compareModels = (imageB64) =>
+  api.post('/compare/models', { image: imageB64 })

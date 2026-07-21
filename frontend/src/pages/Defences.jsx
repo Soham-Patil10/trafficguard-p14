@@ -5,9 +5,11 @@ import { useAttack } from '../context/AttackContext'
 import ImagePanel from '../components/ImagePanel'
 
 const DEFENCE_INFO = {
-  smooth: { desc: 'Applies a median filter across image pixels to remove fine-grained adversarial perturbations before inference.', paper: 'Xu et al., 2018' },
-  diffusion: { desc: 'Purifies adversarial inputs by running them through a diffusion model forward-and-reverse pass, removing perturbations through the denoising process.', paper: 'Nie et al., 2022' },
-  rs: { desc: 'Certifiable defence: adds Gaussian noise to inputs and votes on predictions, providing a provable robustness radius.', paper: 'Cohen et al., 2019' },
+  advtrain: { desc: 'Trains the model on adversarial examples to improve robustness against perturbation attacks.', paper: 'Madry et al., 2018' },
+  jpeg: { desc: 'Compresses input through JPEG encoding/decoding to strip high-frequency adversarial noise.', paper: 'Das et al., 2018' },
+  smooth: { desc: 'Applies spatial smoothing (median filter) to remove fine-grained perturbations.', paper: 'Xu et al., 2018' },
+  rs: { desc: 'Certifiable defense: adds Gaussian noise to inputs and votes on predictions, providing a provable robustness radius.', paper: 'Cohen et al., 2019' },
+  ensemble: { desc: 'Aggregates predictions from multiple independently trained models to dilute single-model vulnerabilities.', paper: 'Tramer et al., 2020' },
 }
 
 const stripDataUrl = (d) => (d && d.includes(',') ? d.split(',')[1] : d)

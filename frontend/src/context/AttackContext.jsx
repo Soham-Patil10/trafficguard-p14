@@ -6,17 +6,14 @@ const AttackContext = createContext(null)
 export function AttackProvider({ children }) {
   const [attacks, setAttacks] = useState({
     fgsm: { enabled: true, epsilon: 0.1 },
-    pgd: { enabled: false, epsilon: 0.1, iterations: 40 },
     labelflip: { enabled: false, rate: 10 },
-    backdoor: { enabled: false },
-  })
+    deepfool: { enabled: false, epsilon: 0.1 },
+})
 
   const [defences, setDefences] = useState({
-    advtrain: { enabled: true, robustAcc: 72.3 },
-    jpeg: { enabled: false, quality: 75 },
-    smooth: { enabled: false, windowSize: 3 },
+    smooth: { enabled: true, windowSize: 3 },
+    diffusion: { enabled: false },
     rs: { enabled: false, sigma: 0.25 },
-    ensemble: { enabled: false },
   })
 
   const [metrics, setMetrics] = useState({

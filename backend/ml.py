@@ -39,11 +39,8 @@ SMOOTH_WINDOW = 3  # spatial-smoothing median window (matches ART SpatialSmoothi
 # ── Module-level cache ────────────────────────────────────────────────────────
 _model = None          # NormalizedResNet in eval() mode (clean model)
 _meta = {}             # checkpoint metadata
-
-# Label-flip poisoned models, keyed by flip rate (e.g. 10, 20, 40).
-# Each entry: {"model": NormalizedResNet, "meta": {...}}
-_poisoned_models: dict[int, dict] = {}
-POISON_RATES = (10, 20, 40)
+_poisoned_model = None # NormalizedResNet in eval() mode (label-flipped model)
+_poisoned_meta = {}    # poisoned checkpoint metadata
 
 
 # ── Model definition ──────────────────────────────────────────────────────────
@@ -183,21 +180,19 @@ def _load_state_flexible(model: NormalizedResNet, state: dict) -> None:
         model.backbone.load_state_dict(state)
 
 
-def load_poisoned_model(checkpoint_path: Path | str, rate: int) -> bool:
-    """Load a label-flipped model (trained with `rate`% flipped labels) into
-    its own slot in `_poisoned_models`, keyed by rate.
+def load_poisoned_model(checkpoint_path: Path | str) -> bool:
+    """Load a second, label-flipped model into a separate slot.
 
     Handles the label-flip notebook's whole-module save (a plain ResNet18 saved
     via torch.save(model)) by copying its weights into a NormalizedResNet backbone
     so it runs in the same [0,1] pixel space as the clean model. Returns True if
     real weights were loaded, False if the checkpoint is missing or unreadable.
     """
+    global _poisoned_model, _poisoned_meta
     checkpoint_path = Path(checkpoint_path)
     if not checkpoint_path.exists():
-        _poisoned_models[rate] = {
-            "model": None,
-            "meta": {"epoch": "missing", "val_acc": 0.0, "loaded": False},
-        }
+        _poisoned_model = None
+        _poisoned_meta = {"epoch": "missing", "val_acc": 0.0, "loaded": False}
         return False
 
     model = NormalizedResNet(num_classes=3).to(DEVICE)
@@ -215,48 +210,23 @@ def load_poisoned_model(checkpoint_path: Path | str, rate: int) -> bool:
         else:  # a plain nn.Module (e.g. the notebook's torch.save(resnet18))
             model.backbone.load_state_dict(ckpt.state_dict())
     except Exception as e:
-        print(f"[TrafficGuard] ERROR: poisoned checkpoint (rate={rate}%) could not be loaded: {e}")
-        _poisoned_models[rate] = {
-            "model": None,
-            "meta": {"epoch": "?", "val_acc": 0.0, "loaded": False},
-        }
+        print(f"[TrafficGuard] ERROR: poisoned checkpoint could not be loaded: {e}")
+        _poisoned_model = None
+        _poisoned_meta = {"epoch": "?", "val_acc": 0.0, "loaded": False}
         return False
 
     model.eval()
-    _poisoned_models[rate] = {"model": model, "meta": meta}
+    _poisoned_model = model
+    _poisoned_meta = meta
     return True
 
 
-def load_all_poisoned_models(checkpoints_dir: Path | str) -> dict[int, bool]:
-    """Convenience loader: looks for poisoned_{rate}pct.pt for each rate in
-    POISON_RATES inside `checkpoints_dir` and loads whichever exist.
-    Returns {rate: loaded_bool}.
-    """
-    checkpoints_dir = Path(checkpoints_dir)
-    results = {}
-    for rate in POISON_RATES:
-        path = checkpoints_dir / f"poisoned_{rate}pct.pt"
-        results[rate] = load_poisoned_model(path, rate)
-    return results
-
-
-def poisoned_meta(rate: int | None = None) -> dict:
-    """Metadata for one rate, or a summary of every loaded rate if rate=None."""
-    if rate is not None:
-        entry = _poisoned_models.get(rate, {"meta": {"epoch": "missing", "val_acc": 0.0, "loaded": False}})
-        m = entry["meta"]
-        return {
-            "rate": rate,
-            "checkpoint_loaded": m.get("loaded", False),
-            "epoch": m.get("epoch"),
-            "val_acc": round(m.get("val_acc", 0.0) * 100, 2),
-        }
-    return {r: poisoned_meta(r) for r in POISON_RATES}
-
-
-def get_poisoned_model(rate: int) -> "NormalizedResNet | None":
-    entry = _poisoned_models.get(rate)
-    return entry["model"] if entry else None
+def poisoned_meta() -> dict:
+    return {
+        "checkpoint_loaded": _poisoned_meta.get("loaded", False),
+        "epoch": _poisoned_meta.get("epoch"),
+        "val_acc": round(_poisoned_meta.get("val_acc", 0.0) * 100, 2),
+    }
 
 
 # ── Inference ─────────────────────────────────────────────────────────────────
@@ -278,79 +248,19 @@ def predict_pil(image: Image.Image) -> dict:
     return _predict_pixels(_pil_to_pixels(image))
 
 
-def compare_pil(image: Image.Image, rate: int = 10) -> dict:
-    """Predict the same image through the clean model and the poisoned model
-    trained at the given flip `rate` (10/20/40).
+def compare_pil(image: Image.Image) -> dict:
+    """Predict the same image through the clean model and the poisoned model.
 
     Returns both predictions plus the (resized) input image. The 'poisoned' entry
-    is None when that rate's checkpoint hasn't been loaded.
+    is None when no poisoned checkpoint has been loaded.
     """
     x = _pil_to_pixels(image)
     clean = _predict_pixels(x)
-    poisoned_model = get_poisoned_model(rate)
-    poisoned = _predict_pixels(x, poisoned_model) if poisoned_model is not None else None
+    poisoned = _predict_pixels(x, _poisoned_model) if _poisoned_model is not None else None
     return {
         "clean":     clean,
         "poisoned":  poisoned,
-        "rate":      rate,
         "image_b64": _pixels_to_b64(x),
-    }
-
-
-# ── Label-flip results (from the actual training run) ─────────────────────────
-# The poisoned_{rate}pct.pt checkpoints are saved as plain torch.save(model)
-# objects with no embedded metadata, so there's no val_acc to read from the
-# file itself. These numbers are the real measured test-set results from the
-# training run documented in attacks/Label Flipping.ipynb (flip High->Low on
-# a stratified 1500-image MIO-TCD subset, 10 epochs per model). If the model
-# is retrained, update these to match the new notebook run.
-LABELFLIP_RESULTS = {
-    0:  {"test_acc": 0.6578, "n_flipped": 0,   "label": "Clean baseline"},
-    10: {"test_acc": 0.6000, "n_flipped": 35,  "label": "Poisoned 10%"},
-    20: {"test_acc": 0.6133, "n_flipped": 70,  "label": "Poisoned 20%"},
-    40: {"test_acc": 0.5689, "n_flipped": 140, "label": "Poisoned 40%"},
-}
-
-
-def labelflip_report(rate: int) -> dict:
-    """Summarise the effect of label-flip poisoning at `rate`% using the real
-    test-set accuracy measured when the poisoned checkpoint was trained
-    (see LABELFLIP_RESULTS above). Label flipping is a training-time attack —
-    there's no per-request image to perturb, so this reports the accuracy
-    degradation from that offline training run rather than live inference.
-    """
-    if get_poisoned_model(rate) is None:
-        return {
-            "status": "missing_checkpoint",
-            "rate": rate,
-            "message": (
-                f"No checkpoint found for {rate}% label flipping. "
-                f"Expected model/checkpoints/poisoned_{rate}pct.pt."
-            ),
-        }
-
-    clean = LABELFLIP_RESULTS[0]
-    poisoned = LABELFLIP_RESULTS.get(rate)
-    if poisoned is None:
-        return {"status": "unknown_rate", "rate": rate,
-                "message": f"No recorded results for rate={rate}. Use 10, 20, or 40."}
-
-    clean_acc = round(clean["test_acc"] * 100, 2)
-    poisoned_acc = round(poisoned["test_acc"] * 100, 2)
-    drop = round(clean_acc - poisoned_acc, 2)
-
-    return {
-        "status": "ok",
-        "rate": rate,
-        "n_flipped": poisoned["n_flipped"],
-        "clean_test_acc": clean_acc,
-        "poisoned_test_acc": poisoned_acc,
-        "accuracy_drop": drop,
-        "message": (
-            f"Label-flip poisoning at {rate}% ({poisoned['n_flipped']} labels "
-            f"flipped High->Low) dropped test accuracy from {clean_acc}% to "
-            f"{poisoned_acc}% ({drop} pt drop)."
-        ),
     }
 
 
@@ -447,8 +357,7 @@ def run_deepfool(image: Image.Image, max_iter: int = 50, overshoot: float = 0.02
     stepping across the nearest decision boundary. The returned `pert_l2` is a
     per-image robustness score: smaller means the model was easier to fool.
 
-    Label-free — it attacks whatever the model currently predicts, so no
-    ground-truth label is needed.
+    Label-free — it attacks whatever the model currently predicts.
     """
     x_clean = _pil_to_pixels(image)
     clean   = _predict_pixels(x_clean)
@@ -463,7 +372,6 @@ def run_deepfool(image: Image.Image, max_iter: int = 50, overshoot: float = 0.02
         x.requires_grad_(True)
         fs = model(x)[0]                       # logits (3,)
 
-        # gradient of every class logit w.r.t. the input
         grads = []
         for k in range(3):
             model.zero_grad(set_to_none=True)
@@ -484,7 +392,6 @@ def run_deepfool(image: Image.Image, max_iter: int = 50, overshoot: float = 0.02
                 best = (d_k, w_k, f_k)
 
         _, w_min, f_min = best
-        # minimal step across the closest boundary
         r_i   = (abs(float(f_min)) + 1e-4) * w_min / (w_min.flatten().norm().item() ** 2 + 1e-8)
         r_tot = r_tot + r_i
         x = (x_clean + (1 + overshoot) * r_tot).clamp(0, 1).detach()

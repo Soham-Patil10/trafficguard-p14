@@ -23,8 +23,6 @@ export const runDeepFool = (imageB64, maxIter = 50) =>
 export const runLabelFlip = (rate) =>
   api.post('/attack/poison/labelflip', { rate })
 
-export const runBackdoor = (triggerConfig) =>
-  api.post('/attack/poison/backdoor', triggerConfig)
 
 // Defence endpoints
 export const getDefenceStatus = () => api.get('/defence/status')

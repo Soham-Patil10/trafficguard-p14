@@ -164,6 +164,20 @@ async def attack_pgd(payload: dict = Body(...)):
     return r
 
 
+@app.post("/attack/deepfool")
+async def attack_deepfool(payload: dict = Body(...)):
+    try:
+        image = _b64_to_pil(payload["image"])
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"bad image: {e}"})
+    max_iter = int(payload.get("max_iter", 50))
+    r = ml.run_deepfool(image, max_iter=max_iter)
+    _record(r["asr"])
+    r.pop("_x_adv", None)
+    r["attack_type"] = "DeepFool"
+    return r
+
+
 @app.post("/attack/poison/labelflip")
 async def attack_labelflip(payload: dict = Body(...)):
     rate = payload.get("rate", 10)
@@ -402,3 +416,4 @@ async def ws_stream(websocket: WebSocket):
         pass
     finally:
         recv_task.cancel()
+ 

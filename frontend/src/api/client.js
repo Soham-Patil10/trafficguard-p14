@@ -16,6 +16,9 @@ export const runFGSM = (imageB64, epsilon) =>
 export const runPGD = (imageB64, epsilon, iterations = 40) =>
   api.post('/attack/pgd', { image: imageB64, epsilon, iterations })
 
+export const runDeepFool = (imageB64, maxIter = 50) =>
+  api.post('/attack/deepfool', { image: imageB64, max_iter: maxIter })
+
 // Poisoning endpoints
 export const runLabelFlip = (rate) =>
   api.post('/attack/poison/labelflip', { rate })
@@ -49,3 +52,4 @@ export const getSamples = () => api.get('/samples')
 export const getCompareStatus = () => api.get('/compare/status')
 export const compareModels = (imageB64) =>
   api.post('/compare/models', { image: imageB64 })
+ 

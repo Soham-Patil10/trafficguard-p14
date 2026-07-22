@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Zap, Play, Upload, ImageIcon, X, ArrowRight } from 'lucide-react'
-import { runFGSM, runPGD, getSamples } from '../api/client'
+import { runFGSM, runPGD, runDeepFool, getSamples } from '../api/client'
 import { useAttack } from '../context/AttackContext'
 import { wsClient } from '../api/websocket'
 import ImagePanel from '../components/ImagePanel'
@@ -11,6 +11,8 @@ const ATTACK_META = [
     description: 'Fast Gradient Sign Method — single-step gradient-based attack that perturbs pixels in the direction of the loss gradient.' },
   { id: 'pgd', name: 'PGD', hasEpsilon: true, extra: 'Iterations: 40',
     description: 'Projected Gradient Descent — iterative version of FGSM that takes multiple small steps, projecting back into the epsilon ball after each step.' },
+  { id: 'deepfool', name: 'DEEPFOOL', hasEpsilon: false, extra: 'Minimal perturbation · reports L2',
+    description: 'DeepFool — finds the smallest perturbation that flips the prediction by stepping to the nearest decision boundary. Reports the minimal L2 change as a robustness score.' },
   { id: 'labelflip', name: 'LABELFLIP', hasEpsilon: false, extra: 'Flip rate: 10%',
     description: 'Label Flipping Poisoning — corrupts a fraction of training labels to degrade model reliability from within.' },
   { id: 'backdoor', name: 'BACKDOOR', hasEpsilon: false,
@@ -123,16 +125,31 @@ export default function AttackLab() {
     wsClient.send({ type: 'epsilon_change', attack: id, epsilon: val })
   }
 
+  // Evasion-attack priority when several toggles are on: PGD > DeepFool > FGSM
+  const selectedAttackId = attacks.pgd.enabled
+    ? 'pgd'
+    : attacks.deepfool.enabled
+    ? 'deepfool'
+    : attacks.fgsm.enabled
+    ? 'fgsm'
+    : null
+
   const runAttack = async () => {
-    if (!cleanInput) return
-    const usePgd = attacks.pgd.enabled
-    const id = usePgd ? 'pgd' : attacks.fgsm.enabled ? 'fgsm' : null
-    if (!id) return
+    if (!cleanInput || !selectedAttackId) return
     setRunning(true); setError(null)
     try {
-      const epsilon = attacks[id].epsilon ?? 0.1
       const b64 = stripDataUrl(cleanInput.image)
-      const res = usePgd ? await runPGD(b64, epsilon, attacks.pgd.iterations ?? 40) : await runFGSM(b64, epsilon)
+      let res, attackType
+      if (selectedAttackId === 'pgd') {
+        res = await runPGD(b64, attacks.pgd.epsilon ?? 0.1, attacks.pgd.iterations ?? 40)
+        attackType = 'PGD'
+      } else if (selectedAttackId === 'deepfool') {
+        res = await runDeepFool(b64, attacks.deepfool.maxIter ?? 50)
+        attackType = 'DeepFool'
+      } else {
+        res = await runFGSM(b64, attacks.fgsm.epsilon ?? 0.1)
+        attackType = 'FGSM'
+      }
       const d = res.data
       setLastAttackResult({
         attackImage: `data:image/jpeg;base64,${d.attack_image}`,
@@ -141,8 +158,11 @@ export default function AttackLab() {
         cleanConf: d.clean_conf,
         attackPred: d.attack_pred,
         attackConf: d.attack_conf,
-        epsilon: Number(d.epsilon).toFixed(2),
-        attackType: usePgd ? 'PGD' : 'FGSM',
+        // FGSM/PGD report epsilon; DeepFool reports pert_l2 + iterations instead
+        epsilon: d.epsilon != null ? Number(d.epsilon).toFixed(2) : null,
+        pertL2: d.pert_l2 != null ? Number(d.pert_l2).toFixed(4) : null,
+        iterations: d.iterations ?? null,
+        attackType,
         fileName: cleanInput.name,
       })
     } catch (e) {
@@ -157,6 +177,8 @@ export default function AttackLab() {
     ? {
         attackType: lastAttackResult.attackType,
         epsilon: lastAttackResult.epsilon,
+        pertL2: lastAttackResult.pertL2,
+        iterations: lastAttackResult.iterations,
         flipped: lastAttackResult.cleanPred !== lastAttackResult.attackPred,
         cleanPred: lastAttackResult.cleanPred,
         cleanConf: (lastAttackResult.cleanConf * 100).toFixed(1),
@@ -165,7 +187,7 @@ export default function AttackLab() {
       }
     : null
 
-  const canRun = (attacks.fgsm.enabled || attacks.pgd.enabled) && cleanInput && !running
+  const canRun = !!selectedAttackId && cleanInput && !running
 
   return (
     <div className="space-y-6">
@@ -235,7 +257,10 @@ export default function AttackLab() {
                   <p className="font-semibold">{resultInfo.flipped ? 'Attack changed the prediction' : 'Attack did not change the prediction'}</p>
                   <p className="text-slate-400 mt-1">
                     {resultInfo.cleanPred} ({resultInfo.cleanConf}%) → <span className="text-red-300">{resultInfo.attackPred}</span> ({resultInfo.attackConf}%)
-                    &nbsp;·&nbsp; {resultInfo.attackType} &nbsp;·&nbsp; ε = <span className="font-mono">{resultInfo.epsilon}</span>
+                    &nbsp;·&nbsp; {resultInfo.attackType}
+                    {resultInfo.attackType === 'DeepFool'
+                      ? <> &nbsp;·&nbsp; L2 = <span className="font-mono">{resultInfo.pertL2}</span> &nbsp;·&nbsp; {resultInfo.iterations} iters</>
+                      : <> &nbsp;·&nbsp; ε = <span className="font-mono">{resultInfo.epsilon}</span></>}
                   </p>
                 </div>
                 <div className="rounded-lg p-3 border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-300 flex items-center gap-2">
@@ -264,7 +289,7 @@ export default function AttackLab() {
           {running ? 'Running...' : 'Run Attack'}
         </button>
         <span className="text-slate-500 text-sm">
-          {!cleanInput ? 'Upload or pick a test image to run attacks' : 'Runs FGSM/PGD on the backend (FGSM/PGD toggles sync with the sidebar)'}
+          {!cleanInput ? 'Upload or pick a test image to run attacks' : 'Runs the enabled evasion attack (priority: PGD > DeepFool > FGSM)'}
         </span>
       </div>
     </div>

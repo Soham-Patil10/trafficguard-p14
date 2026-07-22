@@ -1,0 +1,17 @@
+image,orig_pred,fooled_pred,success,pert_l2,n_iter
+00684878.jpg,Low,Medium,1,0.02462,2
+00516955.jpg,Medium,Low,1,0.69466,3
+00707115.jpg,Low,Medium,1,0.01797,1
+00318422.jpg,Medium,Low,1,0.75658,3
+00058465.jpg,Medium,Low,1,0.78944,3
+00415186.jpg,Medium,Low,1,0.7801,3
+00005078.jpg,Medium,Low,1,0.36855,3
+00377458.jpg,Medium,Low,1,0.24916,3
+00705650.jpg,Medium,Low,1,0.08369,2
+00251552.jpg,Medium,Low,1,0.86994,3
+00485741.jpg,Medium,Low,1,0.15994,2
+00422507.jpg,Medium,Low,1,0.24622,2
+00078113.jpg,Medium,Low,1,0.55095,3
+00216831.jpg,Medium,Low,1,0.31016,2
+00417308.jpg,Medium,Low,1,0.29114,3
+00658255.jpg,Medium,Low,1,0.27027,2

@@ -7,6 +7,7 @@ export function AttackProvider({ children }) {
   const [attacks, setAttacks] = useState({
     fgsm: { enabled: true, epsilon: 0.1 },
     pgd: { enabled: false, epsilon: 0.1, iterations: 40 },
+    deepfool: { enabled: false, maxIter: 50 },
     labelflip: { enabled: false, rate: 10 },
     deepfool: { enabled: false, epsilon: 0.1 },
   })

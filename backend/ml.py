@@ -348,6 +348,78 @@ def run_pgd(image: Image.Image, epsilon: float = 0.1, steps: int = 40, alpha: fl
     }
 
 
+# ── DeepFool attack (Moosavi-Dezfooli et al., 2016) ─────────────────────────
+def run_deepfool(image: Image.Image, max_iter: int = 50, overshoot: float = 0.02) -> dict:
+    """DeepFool: minimal-perturbation evasion attack.
+
+    Where FGSM/PGD push the image by a FIXED epsilon budget, DeepFool searches
+    for the SMALLEST perturbation that still flips the prediction, by repeatedly
+    stepping across the nearest decision boundary. The returned `pert_l2` is a
+    per-image robustness score: smaller means the model was easier to fool.
+
+    Label-free — it attacks whatever the model currently predicts, so no
+    ground-truth label is needed.
+    """
+    x_clean = _pil_to_pixels(image)
+    clean   = _predict_pixels(x_clean)
+    orig_idx = clean["idx"]
+
+    x      = x_clean.clone().detach()
+    r_tot  = torch.zeros_like(x_clean)
+    cur_idx, n_iter = orig_idx, 0
+    model  = get_model()
+
+    while cur_idx == orig_idx and n_iter < max_iter:
+        x.requires_grad_(True)
+        fs = model(x)[0]                       # logits (3,)
+
+        # gradient of every class logit w.r.t. the input
+        grads = []
+        for k in range(3):
+            model.zero_grad(set_to_none=True)
+            if x.grad is not None:
+                x.grad.zero_()
+            fs[k].backward(retain_graph=(k < 2))
+            grads.append(x.grad.detach().clone())
+
+        g_orig = grads[orig_idx]
+        best   = None                          # (distance, w_k, f_k) of nearest boundary
+        for k in range(3):
+            if k == orig_idx:
+                continue
+            w_k = grads[k] - g_orig
+            f_k = (fs[k] - fs[orig_idx]).detach()
+            d_k = abs(float(f_k)) / (w_k.flatten().norm().item() + 1e-8)
+            if best is None or d_k < best[0]:
+                best = (d_k, w_k, f_k)
+
+        _, w_min, f_min = best
+        # minimal step across the closest boundary
+        r_i   = (abs(float(f_min)) + 1e-4) * w_min / (w_min.flatten().norm().item() ** 2 + 1e-8)
+        r_tot = r_tot + r_i
+        x = (x_clean + (1 + overshoot) * r_tot).clamp(0, 1).detach()
+        with torch.no_grad():
+            cur_idx = int(model(x).argmax())
+        n_iter += 1
+
+    x_adv    = x
+    attacked = _predict_pixels(x_adv)
+    return {
+        "clean_pred":   clean["label"],
+        "attack_pred":  attacked["label"],
+        "clean_conf":   clean["confidence"],
+        "attack_conf":  attacked["confidence"],
+        "asr":          int(clean["idx"] != attacked["idx"]),
+        "pert_l2":      round(float(((1 + overshoot) * r_tot).flatten().norm()), 5),
+        "iterations":   n_iter,
+        "clean_probs":  clean["probs"],
+        "attack_probs": attacked["probs"],
+        "clean_image":  _pixels_to_b64(x_clean),
+        "attack_image": _pixels_to_b64(x_adv),
+        "_x_adv":       x_adv,
+    }
+
+
 # ── Spatial-smoothing defence ────────────────────────────────────────────────
 def _median_smooth(x: torch.Tensor, window: int = SMOOTH_WINDOW) -> torch.Tensor:
     """Apply a median filter (the core of ART's SpatialSmoothing) to a [0,1] image."""
@@ -390,3 +462,4 @@ def defend_pil(image: Image.Image, window: int = SMOOTH_WINDOW, smooth: bool = T
         "defended_probs": pred["probs"],
         "defended_image": _pixels_to_b64(x),
     }
+ 

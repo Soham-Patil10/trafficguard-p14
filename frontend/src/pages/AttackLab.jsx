@@ -11,10 +11,10 @@ const ATTACK_META = [
     description: 'Fast Gradient Sign Method — single-step gradient-based attack that perturbs pixels in the direction of the loss gradient.' },
   { id: 'pgd', name: 'PGD', hasEpsilon: true, extra: 'Iterations: 40',
     description: 'Projected Gradient Descent — iterative version of FGSM that takes multiple small steps, projecting back into the epsilon ball after each step.' },
-  { id: 'labelflip', name: 'LABELFLIP', hasEpsilon: false, extra: 'Flip rate: 10%',
+  { id: 'labelflip', name: 'Label Flipping', hasEpsilon: false, extra: 'Flip rate: 10%',
     description: 'Label Flipping Poisoning — corrupts a fraction of training labels to degrade model reliability from within.' },
-  { id: 'backdoor', name: 'BACKDOOR', hasEpsilon: false,
-    description: 'Backdoor Attack — implants a hidden trigger pattern so the model misclassifies whenever the trigger appears at inference.' },
+  { id: 'deepfool', name: 'DeepFool', hasEpsilon: true,
+    description: 'DeepFool — iterative attack that finds the minimal perturbation needed to cross the decision boundary, producing more subtle adversarial examples than FGSM.' },
 ]
 
 const stripDataUrl = (d) => (d && d.includes(',') ? d.split(',')[1] : d)
@@ -126,13 +126,16 @@ export default function AttackLab() {
   const runAttack = async () => {
     if (!cleanInput) return
     const usePgd = attacks.pgd.enabled
-    const id = usePgd ? 'pgd' : attacks.fgsm.enabled ? 'fgsm' : null
-    if (!id) return
+    const useDeepfool = attacks.deepfool?.enabled
+    const id = usePgd ? 'pgd' : useDeepfool ? 'deepfool' : attacks.fgsm.enabled ? 'fgsm' : null
+        if (!id) return
     setRunning(true); setError(null)
     try {
       const epsilon = attacks[id].epsilon ?? 0.1
       const b64 = stripDataUrl(cleanInput.image)
-      const res = usePgd ? await runPGD(b64, epsilon, attacks.pgd.iterations ?? 40) : await runFGSM(b64, epsilon)
+      const res = usePgd
+        ? await runPGD(b64, epsilon, attacks.pgd.iterations ?? 40)
+        : await runFGSM(b64, epsilon)
       const d = res.data
       setLastAttackResult({
         attackImage: `data:image/jpeg;base64,${d.attack_image}`,
@@ -142,7 +145,7 @@ export default function AttackLab() {
         attackPred: d.attack_pred,
         attackConf: d.attack_conf,
         epsilon: Number(d.epsilon).toFixed(2),
-        attackType: usePgd ? 'PGD' : 'FGSM',
+        attackType: usePgd ? 'PGD' : useDeepfool ? 'DeepFool' : 'FGSM',
         fileName: cleanInput.name,
       })
     } catch (e) {
@@ -165,7 +168,7 @@ export default function AttackLab() {
       }
     : null
 
-  const canRun = (attacks.fgsm.enabled || attacks.pgd.enabled) && cleanInput && !running
+  const canRun = (attacks.fgsm.enabled || attacks.pgd.enabled || attacks.deepfool?.enabled) && cleanInput && !running
 
   return (
     <div className="space-y-6">

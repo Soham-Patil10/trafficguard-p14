@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Zap, Play, Upload, ImageIcon, X, ArrowRight } from 'lucide-react'
+import { Zap, Play, Upload, ImageIcon, X, ArrowRight, Info } from 'lucide-react'
 import { runFGSM, runPGD, runDeepFool, getSamples } from '../api/client'
 import { useAttack } from '../context/AttackContext'
 import { wsClient } from '../api/websocket'
@@ -7,18 +7,21 @@ import ImagePanel from '../components/ImagePanel'
 
 // Static display info; enabled/epsilon come from shared context (synced with the sidebar)
 const ATTACK_META = [
-  { id: 'fgsm', name: 'FGSM', hasEpsilon: true,
+  { id: 'fgsm', name: 'FGSM', hasEpsilon: true, kind: 'evasion',
     description: 'Fast Gradient Sign Method — single-step gradient-based attack that perturbs pixels in the direction of the loss gradient.' },
-  { id: 'pgd', name: 'PGD', hasEpsilon: true, extra: 'Iterations: 40',
+  { id: 'pgd', name: 'PGD', hasEpsilon: true, extra: 'Iterations: 40', kind: 'evasion',
     description: 'Projected Gradient Descent — iterative version of FGSM that takes multiple small steps, projecting back into the epsilon ball after each step.' },
-  { id: 'labelflip', name: 'Label Flipping', hasEpsilon: false, extra: 'Flip rate: 10%',
-  { id: 'deepfool', name: 'DEEPFOOL', hasEpsilon: false, extra: 'Minimal perturbation · reports L2',
-    description: 'DeepFool — finds the smallest perturbation that flips the prediction by stepping to the nearest decision boundary. Reports the minimal L2 change as a robustness score.' },
-  { id: 'labelflip', name: 'LABELFLIP', hasEpsilon: false, extra: 'Flip rate: 10%',
-    description: 'Label Flipping Poisoning — corrupts a fraction of training labels to degrade model reliability from within.' },
-  { id: 'deepfool', name: 'DeepFool', hasEpsilon: true,
-    description: 'DeepFool — iterative attack that finds the minimal perturbation needed to cross the decision boundary, producing more subtle adversarial examples than FGSM.' },
+  // DeepFool has NO epsilon: it searches for the minimal perturbation itself and
+  // reports the resulting L2 as a robustness score.
+  { id: 'deepfool', name: 'DeepFool', hasEpsilon: false, extra: 'Minimal perturbation · reports L2', kind: 'evasion',
+    description: 'DeepFool — iteratively steps to the nearest decision boundary to find the smallest perturbation that flips the prediction. Reports the minimal L2 change instead of taking an epsilon budget.' },
+  // Poisoning is a TRAINING-time attack: it cannot run on a single image here.
+  { id: 'labelflip', name: 'Label Flipping', hasEpsilon: false, extra: 'Training-time · see Comparison tab', kind: 'poisoning',
+    description: 'Label Flipping Poisoning — corrupts a fraction of training labels to degrade model reliability from within. Runs offline during training, not per-image.' },
 ]
+
+// Evasion attacks in priority order (first enabled one wins)
+const EVASION_PRIORITY = ['pgd', 'deepfool', 'fgsm']
 
 const stripDataUrl = (d) => (d && d.includes(',') ? d.split(',')[1] : d)
 
@@ -34,12 +37,21 @@ function Toggle({ enabled, onChange }) {
 }
 
 function AttackCard({ meta, attack, onToggle, onEpsilon }) {
-  const enabled = attack.enabled
-  const epsilon = attack.epsilon ?? 0.1
+  // Defensive: an attack id may not exist in context yet
+  const a = attack || {}
+  const enabled = !!a.enabled
+  const epsilon = a.epsilon ?? 0.1
   return (
     <div className={`rounded-xl border p-6 flex flex-col gap-4 transition-colors ${enabled ? 'bg-[#1a1f2e] border-slate-600' : 'bg-[#12151f] border-slate-700'}`}>
       <div className="flex items-center justify-between">
-        <span className="font-bold tracking-wide text-white">{meta.name}</span>
+        <div className="flex items-center gap-2">
+          <span className="font-bold tracking-wide text-white">{meta.name}</span>
+          {meta.kind === 'poisoning' && (
+            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+              poisoning
+            </span>
+          )}
+        </div>
         <Toggle enabled={enabled} onChange={() => onToggle(meta.id)} />
       </div>
       <p className="text-slate-400 text-sm leading-relaxed">{meta.description}</p>
@@ -117,48 +129,38 @@ export default function AttackLab() {
 
   // Keep the sidebar in sync: toggling/sliding here updates shared context + the WS.
   const handleToggle = (id) => {
-    const willEnable = !attacks[id].enabled
+    const willEnable = !attacks[id]?.enabled
     toggleAttack(id)
-    wsClient.send({ type: 'attack_control', attack: id, enabled: willEnable, epsilon: attacks[id].epsilon })
+    wsClient.send({ type: 'attack_control', attack: id, enabled: willEnable, epsilon: attacks[id]?.epsilon })
   }
   const handleEpsilon = (id, val) => {
     setEpsilon(id, val)
     wsClient.send({ type: 'epsilon_change', attack: id, epsilon: val })
   }
 
-  // Evasion-attack priority when several toggles are on: PGD > DeepFool > FGSM
-  const selectedAttackId = attacks.pgd.enabled
-    ? 'pgd'
-    : attacks.deepfool.enabled
-    ? 'deepfool'
-    : attacks.fgsm.enabled
-    ? 'fgsm'
-    : null
+  // Which evasion attack will actually run (poisoning is excluded — it's training-time)
+  const selectedAttackId = EVASION_PRIORITY.find((id) => attacks[id]?.enabled) || null
+  const poisoningOnly = !selectedAttackId && !!attacks.labelflip?.enabled
 
   const runAttack = async () => {
-    if (!cleanInput) return
-    const usePgd = attacks.pgd.enabled
-    const useDeepfool = attacks.deepfool?.enabled
-    const id = usePgd ? 'pgd' : useDeepfool ? 'deepfool' : attacks.fgsm.enabled ? 'fgsm' : null
-        if (!id) return
     if (!cleanInput || !selectedAttackId) return
     setRunning(true); setError(null)
     try {
       const b64 = stripDataUrl(cleanInput.image)
-      const res = usePgd
-        ? await runPGD(b64, epsilon, attacks.pgd.iterations ?? 40)
-        : await runFGSM(b64, epsilon)
       let res, attackType
+
       if (selectedAttackId === 'pgd') {
         res = await runPGD(b64, attacks.pgd.epsilon ?? 0.1, attacks.pgd.iterations ?? 40)
         attackType = 'PGD'
       } else if (selectedAttackId === 'deepfool') {
-        res = await runDeepFool(b64, attacks.deepfool.maxIter ?? 50)
+        // DeepFool takes max_iter, NOT epsilon — it finds the minimal perturbation itself
+        res = await runDeepFool(b64, attacks.deepfool?.maxIter ?? 50)
         attackType = 'DeepFool'
       } else {
         res = await runFGSM(b64, attacks.fgsm.epsilon ?? 0.1)
         attackType = 'FGSM'
       }
+
       const d = res.data
       setLastAttackResult({
         attackImage: `data:image/jpeg;base64,${d.attack_image}`,
@@ -167,8 +169,6 @@ export default function AttackLab() {
         cleanConf: d.clean_conf,
         attackPred: d.attack_pred,
         attackConf: d.attack_conf,
-        epsilon: Number(d.epsilon).toFixed(2),
-        attackType: usePgd ? 'PGD' : useDeepfool ? 'DeepFool' : 'FGSM',
         // FGSM/PGD report epsilon; DeepFool reports pert_l2 + iterations instead
         epsilon: d.epsilon != null ? Number(d.epsilon).toFixed(2) : null,
         pertL2: d.pert_l2 != null ? Number(d.pert_l2).toFixed(4) : null,
@@ -177,7 +177,7 @@ export default function AttackLab() {
         fileName: cleanInput.name,
       })
     } catch (e) {
-      setError(e?.message || 'request failed')
+      setError(e?.response?.data?.error || e?.message || 'request failed')
     } finally {
       setRunning(false)
     }
@@ -198,7 +198,6 @@ export default function AttackLab() {
       }
     : null
 
-  const canRun = (attacks.fgsm.enabled || attacks.pgd.enabled || attacks.deepfool?.enabled) && cleanInput && !running
   const canRun = !!selectedAttackId && cleanInput && !running
 
   return (
@@ -209,7 +208,7 @@ export default function AttackLab() {
         </div>
         <div>
           <h2 className="text-2xl font-bold">Attack Lab</h2>
-          <p className="text-slate-400 text-sm">Upload or pick a frame, run FGSM/PGD, compare clean vs attacked</p>
+          <p className="text-slate-400 text-sm">Upload or pick a frame, run FGSM/PGD/DeepFool, compare clean vs attacked</p>
         </div>
       </div>
 
@@ -285,6 +284,17 @@ export default function AttackLab() {
         )}
       </div>
 
+      {poisoningOnly && (
+        <div className="rounded-lg p-4 border border-amber-500/30 bg-amber-500/10 text-sm text-amber-300 flex items-start gap-2">
+          <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>
+            Label Flipping is a <strong>training-time</strong> poisoning attack — it corrupts labels and retrains the
+            model, so it can't run on a single image here. Enable FGSM, PGD or DeepFool to attack this frame, and use
+            the <strong>Comparison</strong> tab to see the poisoned model's effect.
+          </span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {ATTACK_META.map((meta) => (
           <AttackCard key={meta.id} meta={meta} attack={attacks[meta.id]} onToggle={handleToggle} onEpsilon={handleEpsilon} />
@@ -301,7 +311,11 @@ export default function AttackLab() {
           {running ? 'Running...' : 'Run Attack'}
         </button>
         <span className="text-slate-500 text-sm">
-          {!cleanInput ? 'Upload or pick a test image to run attacks' : 'Runs the enabled evasion attack (priority: PGD > DeepFool > FGSM)'}
+          {!cleanInput
+            ? 'Upload or pick a test image to run attacks'
+            : selectedAttackId
+            ? `Will run ${selectedAttackId.toUpperCase()} on the backend (priority: PGD > DeepFool > FGSM)`
+            : 'Enable an evasion attack (FGSM, PGD or DeepFool) to run'}
         </span>
       </div>
     </div>

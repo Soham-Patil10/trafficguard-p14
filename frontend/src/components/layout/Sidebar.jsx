@@ -52,8 +52,8 @@ export default function Sidebar() {
           <div className="mt-2 space-y-2">
             <AttackToggle attackName="fgsm" label="FGSM" dotColor="#f87171" />
             <AttackToggle attackName="pgd" label="PGD" dotColor="#fb923c" />
-            <AttackToggle attackName="labelflip" label="Label Flip" dotColor="#facc15" />
-            <AttackToggle attackName="backdoor" label="Backdoor" dotColor="#c084fc" />
+            <AttackToggle attackName="labelflip" label="Label Flipping" dotColor="#facc15" />
+            <AttackToggle attackName="deepfool" label="DeepFool" dotColor="#c084fc" />
           </div>
         </div>
 
@@ -62,11 +62,10 @@ export default function Sidebar() {
         <div>
           <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">Defences</span>
           <div className="mt-2 space-y-2">
-            <DefenceToggle defenceName="advtrain" label="Adv. Training" />
+            <DefenceToggle defenceName="smooth" label="Spatial Smoothing" />
+            <DefenceToggle defenceName="diffusion" label="Diffusion Purification" />
+            <DefenceToggle defenceName="rs" label="Randomised Smoothing" />
             <DefenceToggle defenceName="jpeg" label="JPEG Compress" />
-            <DefenceToggle defenceName="smooth" label="Smoothing" />
-            <DefenceToggle defenceName="rs" label="Rand. Smoothing" />
-            <DefenceToggle defenceName="ensemble" label="Ensemble" />
           </div>
         </div>
       </div>

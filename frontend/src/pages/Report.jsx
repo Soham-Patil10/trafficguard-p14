@@ -5,104 +5,120 @@ import { useStream } from '../context/StreamContext'
 import { applyDefence } from '../api/client'
 import { FileText, Download, Loader2, AlertTriangle } from 'lucide-react'
 
-// ── readable names ────────────────────────────────────────────────────────────
-const ATTACK_NAMES = { fgsm: 'FGSM', pgd: 'PGD', labelflip: 'Label Flip', backdoor: 'Backdoor' }
+// ── readable names (matches final attack/defence list) ────────────────────────
+const ATTACK_NAMES = {
+  fgsm:      'FGSM',
+  pgd:       'PGD',
+  labelflip: 'Label Flipping',
+  deepfool:  'DeepFool',
+}
 const DEFENCE_NAMES = {
-  advtrain: 'Adversarial Training',
-  jpeg: 'JPEG Compression',
-  smooth: 'Spatial Smoothing',
-  rs: 'Randomized Smoothing',
-  ensemble: 'Ensemble',
+  smooth:    'Spatial Smoothing',
+  diffusion: 'Diffusion Purification',
+  rs:        'Randomised Smoothing',
+  jpeg:      'JPEG Compression',
 }
 const PRED_HEX = { Low: '#22c55e', Medium: '#f59e0b', High: '#ef4444' }
 
-// ── small helpers ───────────────────────────────────────────────────────────-
+// ── small helpers ─────────────────────────────────────────────────────────────
 const stripDataUrl = (s = '') => (s.includes(',') ? s.split(',')[1] : s)
-const toDataUrl = (s = '') => (s.startsWith('data:') ? s : `data:image/jpeg;base64,${s}`)
-const imgFormat = (s = '') => (s.includes('image/png') ? 'PNG' : 'JPEG')
-const hexToRgb = (hex) => {
+const toDataUrl    = (s = '') => (s.startsWith('data:') ? s : `data:image/jpeg;base64,${s}`)
+const imgFormat    = (s = '') => (s.includes('image/png') ? 'PNG' : 'JPEG')
+const hexToRgb     = (hex) => {
   const h = hex.replace('#', '')
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)]
 }
+// Fix: ASR colour thresholds
 const asrColor = (a) => (a == null ? '#64748b' : a > 70 ? '#ef4444' : a > 40 ? '#f59e0b' : '#22c55e')
 
+// Fix: normalise confidence to percentage exactly once
+const toPercent = (v) => {
+  const n = Number(v)
+  if (isNaN(n)) return 0
+  return n <= 1 ? n * 100 : n   // if already a percentage (>1) leave it alone
+}
+
 export default function ReportPage() {
-  const { metrics, attacks, defences, lastAttackResult } = useAttack()
+  const { metrics, attacks, defences, lastAttackResult, lastDefenceResult } = useAttack()
   const { latestFrame } = useStream()
   const [generating, setGenerating] = useState(false)
-  const [error, setError] = useState(null)
+  const [error, setError]           = useState(null)
 
-  // Normalise the "most recent image" to one shape, whichever source has it.
-  // Prefer a deliberate Attack-Lab capture (has clean+attacked); fall back to the
-  // live stream frame so a report is still possible mid-demo.
+  // Prefer Attack Lab capture; fall back to live stream frame
   const capture = lastAttackResult
     ? {
-        source: 'Attack Lab',
-        fileName: lastAttackResult.fileName,
+        source:     'Attack Lab',
+        fileName:   lastAttackResult.fileName,
         cleanImage: lastAttackResult.cleanImage,
-        attackImage: lastAttackResult.attackImage,
-        cleanPred: lastAttackResult.cleanPred,
-        cleanConf: Number(lastAttackResult.cleanConf) * 100,
+        attackImage:lastAttackResult.attackImage,
+        cleanPred:  lastAttackResult.cleanPred,
+        cleanConf:  toPercent(lastAttackResult.cleanConf),
         attackPred: lastAttackResult.attackPred,
-        attackConf: Number(lastAttackResult.attackConf) * 100,
+        attackConf: toPercent(lastAttackResult.attackConf),
         attackType: lastAttackResult.attackType,
-        epsilon: lastAttackResult.epsilon,
+        epsilon:    lastAttackResult.epsilon,
       }
-    : latestFrame && latestFrame.clean_image
+    : latestFrame?.clean_image
     ? {
-        source: 'Live Stream',
-        fileName: `frame_${latestFrame.frame_id}`,
+        source:     'Live Stream',
+        fileName:   `frame_${latestFrame.frame_id}`,
         cleanImage: latestFrame.clean_image,
-        attackImage: latestFrame.attack_image,
-        cleanPred: String(latestFrame.clean_pred),
-        cleanConf: Number(latestFrame.clean_conf) * 100,
+        attackImage:latestFrame.attack_image,
+        cleanPred:  String(latestFrame.clean_pred),
+        cleanConf:  toPercent(latestFrame.clean_conf),
         attackPred: String(latestFrame.attack_pred),
-        attackConf: Number(latestFrame.attack_conf) * 100,
+        attackConf: toPercent(latestFrame.attack_conf),
         attackType: String(latestFrame.attack_type ?? 'FGSM'),
-        epsilon: String(latestFrame.epsilon ?? '0.10'),
+        epsilon:    String(latestFrame.epsilon ?? '0.10'),
       }
     : null
 
   const attackSucceeded = capture ? capture.cleanPred !== capture.attackPred : null
+
+  const enabledAttacks  = Object.entries(attacks)
+    .filter(([, v]) => v.enabled)
+    .map(([k]) => ATTACK_NAMES[k] ?? k)
 
   const enabledDefences = Object.entries(defences)
     .filter(([, v]) => v.enabled)
     .map(([k]) => DEFENCE_NAMES[k] ?? k)
 
   async function handleGenerateReport() {
-    if (!capture) {
-      setError('No image processed yet. Run an attack in the Attack Lab (or start the live stream) first.')
-      return
-    }
-    setGenerating(true)
-    setError(null)
-    try {
-      // 1) Evaluate the defence on the most recent attacked image so we can report
-      //    a real defence-success verdict (defended_pred === cleanPred).
-      const windowSize = defences?.smooth?.windowSize ?? 3
-      let defence = null
-      try {
-        const res = await applyDefence(stripDataUrl(capture.attackImage), windowSize)
-        const d = res.data
-        defence = {
-          pred: d.defended_pred,
-          conf: Number(d.defended_conf) * 100,
-          image: `data:image/jpeg;base64,${d.defended_image}`,
-          recovered: d.defended_pred === capture.cleanPred,
-          windowSize,
-        }
-      } catch (e) {
-        console.error('Defence evaluation failed (backend offline?)', e)
-        defence = null // report still generates; defence section shows "not evaluated"
+      if (!capture) {
+        setError('No image processed yet. Run an attack in the Attack Lab (or start the live stream) first.')
+        return
       }
+      setGenerating(true)
+      setError(null)
+      try {
+        // Use the defence result already computed in the Defence Lab
+        // instead of re-running it, so the report matches what the dashboard showed
+        const defence = lastDefenceResult
+          ? {
+              pred: lastDefenceResult.pred,
+              conf: Number(lastDefenceResult.conf),
+              image: lastDefenceResult.image,
+              recovered: lastDefenceResult.recovered,
+              windowSize: lastDefenceResult.windowSize,
+            }
+          : null
 
-      buildPdf({ capture, defence, metrics, defences: enabledDefences, attackSucceeded })
-    } catch (e) {
-      console.error('Report generation failed', e)
-      setError(e?.message || 'Report generation failed.')
-    } finally {
-      setGenerating(false)
-    }
+        buildPdf({
+          capture,
+          defence,
+          metrics,
+          enabledAttacks,
+          enabledDefences,
+          attackSucceeded,
+          attacks,
+          defences,
+        })
+      } catch (e) {
+        console.error('Report generation failed', e)
+        setError(e?.message || 'Report generation failed.')
+      } finally {
+        setGenerating(false)
+      }
   }
 
   return (
@@ -113,9 +129,7 @@ export default function ReportPage() {
         </div>
         <div>
           <h2 className="text-lg font-bold text-slate-100">Security Audit Report</h2>
-          <p className="text-xs text-slate-500">
-            Download a PDF of the latest attack/defence result
-          </p>
+          <p className="text-xs text-slate-500">Download a PDF of the latest attack / defence result</p>
         </div>
       </div>
 
@@ -126,17 +140,20 @@ export default function ReportPage() {
         </h3>
         <ul className="text-sm text-slate-400 space-y-1.5 list-disc list-inside">
           <li>Live ASR meter (current attack success rate)</li>
-          <li>Frame comparison — clean vs attacked of the most recent image</li>
-          <li>Which attack and defence performed</li>
-          <li>Attack success (did the prediction flip?)</li>
-          <li>Defence success (did smoothing recover the correct label?)</li>
+          <li>Frame comparison — clean vs attacked vs defended</li>
+          <li>Attack performed (FGSM / PGD / Label Flipping / DeepFool) and epsilon value</li>
+          <li>Defence performed (Spatial Smoothing / Diffusion Purification / Randomised Smoothing / JPEG)</li>
+          <li>Attack success verdict (did the prediction flip?)</li>
+          <li>Defence success verdict (did the defence recover the correct label?)</li>
+          <li>Session metrics — clean accuracy, robust accuracy, ASR, certified radius</li>
+          <li>Active attacks and defences at time of generation</li>
         </ul>
       </div>
 
-      {/* Live preview of the capture that will be reported */}
+      {/* Live preview */}
       <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl p-5">
         <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-4">
-          Latest Capture {capture && <span className="text-slate-600 normal-case">· {capture.source}</span>}
+          Latest Capture{capture && <span className="text-slate-600 normal-case"> · {capture.source}</span>}
         </h3>
 
         {!capture ? (
@@ -164,6 +181,7 @@ export default function ReportPage() {
                 </div>
               </figure>
             </div>
+
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-slate-400">Live ASR</span>
@@ -180,6 +198,9 @@ export default function ReportPage() {
               <div className="flex justify-between">
                 <span className="text-slate-400">Defence success</span>
                 <span className="font-mono text-slate-500">evaluated on download</span>
+              </div>
+              <div className="text-xs text-slate-500">
+                Active attacks: {enabledAttacks.length ? enabledAttacks.join(', ') : 'none'}
               </div>
               <div className="text-xs text-slate-500">
                 Active defences: {enabledDefences.length ? enabledDefences.join(', ') : 'none'}
@@ -210,16 +231,26 @@ export default function ReportPage() {
   )
 }
 
-// ── PDF builder (client-side, jsPDF) ──────────────────────────────────────────
-function buildPdf({ capture, defence, metrics, defences, attackSucceeded }) {
+// ── PDF builder ───────────────────────────────────────────────────────────────
+function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, attackSucceeded, attacks, defences }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
-  const W = doc.internal.pageSize.getWidth() // ~595
-  const M = 40 // margin
-  const CW = W - M * 2 // content width
+  const W  = doc.internal.pageSize.getWidth()   // 595
+  const H  = doc.internal.pageSize.getHeight()  // 842
+  const M  = 40
+  const CW = W - M * 2
 
   const setFill = (hex) => doc.setFillColor(...hexToRgb(hex))
   const setDraw = (hex) => doc.setDrawColor(...hexToRgb(hex))
   const setText = (hex) => doc.setTextColor(...hexToRgb(hex))
+
+  // guard: start a new page if y would overflow
+  const checkPage = (y, needed = 60) => {
+    if (y + needed > H - 40) {
+      doc.addPage()
+      return 40
+    }
+    return y
+  }
 
   // ── Header band ──
   setFill('#0f172a')
@@ -238,17 +269,17 @@ function buildPdf({ capture, defence, metrics, defences, attackSucceeded }) {
 
   let y = 110
 
-  // ── Section: ASR gauge + verdicts (two columns) ──
-  sectionLabel(doc, 'ATTACK SUMMARY', M, y)
-  y += 14
+  // ── Section 1: ASR gauge + verdicts ──
+  sectionLabel(doc, 'ATTACK SUMMARY', M, y); y += 14
   const rowTop = y
-  const colW = (CW - 20) / 2
+  const colW   = (CW - 20) / 2
 
   // left card: ASR gauge
-  card(doc, M, rowTop, colW, 150)
+  card(doc, M, rowTop, colW, 160)
   const cx = M + colW / 2
-  const cy = rowTop + 96
-  const R = 52
+  const cy = rowTop + 100
+  const R  = 52
+  // Fix: arc goes left-to-right (180→0 for background, then fill from 180 forward)
   drawArc(doc, cx, cy, R, 180, 0, '#e2e8f0', 12)
   const a = typeof metrics.asr === 'number' ? metrics.asr : null
   if (a != null) drawArc(doc, cx, cy, R, 180, 180 - (a / 100) * 180, asrColor(a), 12)
@@ -257,38 +288,29 @@ function buildPdf({ capture, defence, metrics, defences, attackSucceeded }) {
   doc.text(a == null ? 'N/A' : `${a.toFixed(1)}%`, cx, cy - 4, { align: 'center' })
   setText('#64748b')
   doc.setFont('helvetica', 'normal').setFontSize(7.5)
-  doc.text('LIVE ATTACK SUCCESS RATE', cx, cy + 12, { align: 'center' })
+  doc.text('LIVE ATTACK SUCCESS RATE', cx, cy + 14, { align: 'center' })
   setText('#334155')
   doc.setFontSize(9)
   doc.text('Live ASR Meter', M + 12, rowTop + 20)
 
   // right card: verdicts
   const rx = M + colW + 20
-  card(doc, rx, rowTop, colW, 150)
+  card(doc, rx, rowTop, colW, 160)
   setText('#334155')
   doc.setFont('helvetica', 'bold').setFontSize(9)
   doc.text('Verdicts', rx + 12, rowTop + 20)
 
-  // attack verdict badge
   badge(
-    doc,
-    rx + 12,
-    rowTop + 34,
-    colW - 24,
+    doc, rx + 12, rowTop + 36, colW - 24,
     attackSucceeded ? '#ef4444' : '#22c55e',
     attackSucceeded ? 'ATTACK SUCCEEDED' : 'ATTACK FAILED',
     attackSucceeded
       ? `prediction flipped  ${capture.cleanPred} -> ${capture.attackPred}`
       : `no flip — stayed ${capture.cleanPred}`
   )
-
-  // defence verdict badge
   const defOk = defence ? defence.recovered : null
   badge(
-    doc,
-    rx + 12,
-    rowTop + 86,
-    colW - 24,
+    doc, rx + 12, rowTop + 96, colW - 24,
     defence == null ? '#64748b' : defOk ? '#22c55e' : '#f59e0b',
     defence == null ? 'DEFENCE NOT EVALUATED' : defOk ? 'DEFENCE RECOVERED' : 'DEFENCE DID NOT RECOVER',
     defence == null
@@ -298,83 +320,142 @@ function buildPdf({ capture, defence, metrics, defences, attackSucceeded }) {
       : `still ${defence.pred} (${defence.conf.toFixed(1)}%)`
   )
 
-  y = rowTop + 150 + 22
+  y = rowTop + 160 + 22
 
-  // ── Section: attack & defence performed ──
-  sectionLabel(doc, 'ATTACK & DEFENCE PERFORMED', M, y)
-  y += 14
-  card(doc, M, y, CW, 52)
+  // ── Section 2: attack & defence details ──
+  y = checkPage(y, 80)
+  sectionLabel(doc, 'ATTACK & DEFENCE PERFORMED', M, y); y += 14
+  card(doc, M, y, CW, 70)
   setText('#334155')
   doc.setFont('helvetica', 'bold').setFontSize(10)
-  doc.text(`Attack:  ${capture.attackType}  (epsilon = ${capture.epsilon})`, M + 14, y + 22)
-  const defLine = defence
-    ? `Defence: Spatial Smoothing (median, window ${defence.windowSize})`
-    : 'Defence: Spatial Smoothing (not evaluated)'
-  doc.text(defLine, M + 14, y + 40)
-  setText('#64748b')
-  doc.setFont('helvetica', 'normal').setFontSize(8.5)
-  doc.text(`Active defences: ${defences.length ? defences.join(', ') : 'none'}`, W - M - 14, y + 40, { align: 'right' })
-  y += 52 + 22
+  doc.text(`Attack:   ${capture.attackType}  (epsilon = ${capture.epsilon})`, M + 14, y + 22)
 
-  // ── Section: frame comparison clean -> attacked -> defended ──
-  sectionLabel(doc, 'FRAME COMPARISON — CLEAN vs ATTACKED', M, y)
-  y += 16
+  // Fix: dynamically build defence line from what's actually enabled
+  const activeDefenceLine = enabledDefences.length
+    ? enabledDefences.join(', ')
+    : 'none'
+  const defLineDetail = defence
+    ? `Defence:  Spatial Smoothing (window ${defence.windowSize})`
+    : `Defence:  ${activeDefenceLine}`
+  doc.text(defLineDetail, M + 14, y + 42)
+
+  setText('#64748b')
+  doc.setFont('helvetica', 'normal').setFontSize(8)
+  // Fix: wrap the active defences text properly
+  const allAttacksTxt = `Active attacks: ${enabledAttacks.length ? enabledAttacks.join(', ') : 'none'}`
+  const allDefencesTxt = `Active defences: ${activeDefenceLine}`
+  doc.text(allAttacksTxt, M + 14, y + 58)
+  doc.text(allDefencesTxt, W - M - 14, y + 58, { align: 'right' })
+  y += 70 + 22
+
+  // ── Section 3: frame comparison ──
+  y = checkPage(y, 180)
+  sectionLabel(doc, 'FRAME COMPARISON — CLEAN vs ATTACKED vs DEFENDED', M, y); y += 16
   const panels = [
-    { label: 'CLEAN INPUT', color: '#22c55e', img: capture.cleanImage, pred: capture.cleanPred, conf: capture.cleanConf },
+    { label: 'CLEAN INPUT',          color: '#22c55e', img: capture.cleanImage,  pred: capture.cleanPred,  conf: capture.cleanConf },
     { label: `ATTACKED (${capture.attackType})`, color: '#ef4444', img: capture.attackImage, pred: capture.attackPred, conf: capture.attackConf },
   ]
   if (defence) {
     panels.push({ label: 'DEFENDED (SMOOTHED)', color: '#0ea5e9', img: defence.image, pred: defence.pred, conf: defence.conf })
   }
-  const n = panels.length
-  const gap = 18
-  const pW = (CW - gap * (n - 1)) / n
-  const pImgH = 120
+  const n    = panels.length
+  const gap  = 16
+  const pW   = (CW - gap * (n - 1)) / n
+  const pImgH = 110
   panels.forEach((p, i) => {
     const px = M + i * (pW + gap)
-    // label bar
     setFill(p.color)
     doc.rect(px, y, pW, 16, 'F')
     setText('#ffffff')
-    doc.setFont('helvetica', 'bold').setFontSize(7.5)
+    doc.setFont('helvetica', 'bold').setFontSize(7)
     doc.text(p.label, px + 6, y + 11)
-    // image (with graceful fallback)
     try {
       doc.addImage(toDataUrl(p.img), imgFormat(toDataUrl(p.img)), px, y + 16, pW, pImgH)
-    } catch (e) {
+    } catch {
       setFill('#f1f5f9')
       doc.rect(px, y + 16, pW, pImgH, 'F')
       setText('#94a3b8')
       doc.setFont('helvetica', 'normal').setFontSize(8)
       doc.text('image unavailable', px + pW / 2, y + 16 + pImgH / 2, { align: 'center' })
     }
-    // caption
     setDraw('#e2e8f0')
-    doc.rect(px, y + 16 + pImgH, pW, 22)
+    doc.rect(px, y + 16 + pImgH, pW, 24)
     setText(PRED_HEX[p.pred] ?? '#334155')
     doc.setFont('helvetica', 'bold').setFontSize(9)
-    doc.text(`${String(p.pred).toUpperCase()}`, px + 6, y + 16 + pImgH + 15)
+    doc.text(String(p.pred).toUpperCase(), px + 6, y + 16 + pImgH + 16)
     setText('#64748b')
     doc.setFont('helvetica', 'normal').setFontSize(8)
-    doc.text(`conf ${Number(p.conf).toFixed(1)}%`, px + pW - 6, y + 16 + pImgH + 15, { align: 'right' })
+    doc.text(`conf ${Number(p.conf).toFixed(1)}%`, px + pW - 6, y + 16 + pImgH + 16, { align: 'right' })
   })
-  y += 16 + pImgH + 22 + 24
+  y += 16 + pImgH + 24 + 28
 
-  // ── Section: session metrics ──
-  sectionLabel(doc, 'SESSION METRICS', M, y)
-  y += 14
-  card(doc, M, y, CW, 56)
+  // ── Section 4: session metrics ──
+  y = checkPage(y, 80)
+  sectionLabel(doc, 'SESSION METRICS', M, y); y += 14
+  // Fix: taller card so values don't clip
+  card(doc, M, y, CW, 70)
   const fmt = (v) => (typeof v === 'number' ? `${v.toFixed(1)}%` : 'N/A')
-  metricCell(doc, M + 14, y, 'Clean Accuracy', fmt(metrics.cleanAcc), '#22c55e')
-  metricCell(doc, M + 14 + CW / 4, y, 'Robust Accuracy', fmt(metrics.robustAcc), '#f59e0b')
-  metricCell(doc, M + 14 + (CW / 4) * 2, y, 'Attack Success Rate', fmt(metrics.asr), '#ef4444')
-  metricCell(doc, M + 14 + (CW / 4) * 3, y, 'Certified Radius', metrics.certifiedRadius ?? 'N/A', '#0ea5e9')
+  metricCell(doc, M + 14,              y, 'Clean Accuracy',    fmt(metrics.cleanAcc),       '#22c55e')
+  metricCell(doc, M + 14 + CW / 4,    y, 'Robust Accuracy',   fmt(metrics.robustAcc),      '#f59e0b')
+  metricCell(doc, M + 14 + CW / 4 * 2,y, 'Attack Success Rate',fmt(metrics.asr),           '#ef4444')
+  metricCell(doc, M + 14 + CW / 4 * 3,y, 'Certified Radius',  metrics.certifiedRadius ?? 'N/A', '#0ea5e9')
+  y += 70 + 22
+
+  // ── Section 5: configuration snapshot ──
+  y = checkPage(y, 120)
+  sectionLabel(doc, 'CONFIGURATION SNAPSHOT', M, y); y += 14
+
+  const attackLines = Object.entries(attacks).map(([k, v]) => {
+    const name   = ATTACK_NAMES[k] ?? k
+    const detail = v.epsilon != null
+      ? `eps=${Number(v.epsilon).toFixed(2)}`
+      : v.rate != null ? `rate=${v.rate}%` : ''
+    return `${name}${detail ? ` (${detail})` : ''} - ${v.enabled ? 'ON' : 'off'}`
+  })
+
+  const defenceLines = Object.entries(defences).map(([k, v]) => {
+    const name = DEFENCE_NAMES[k] ?? k
+    return `${name} - ${v.enabled ? 'ON' : 'off'}`
+  })
+
+  const cardHeight = 28 + (attackLines.length * 13) + 16 + (defenceLines.length * 13) + 14
+  card(doc, M, y, CW, cardHeight)
+
+  setText('#334155')
+  doc.setFont('helvetica', 'bold').setFontSize(9)
+  doc.text('Attacks configured at report time:', M + 14, y + 18)
+  setText('#64748b')
+  doc.setFont('helvetica', 'normal').setFontSize(8.5)
+  let lineY = y + 32
+  attackLines.forEach((line) => {
+    doc.text(line, M + 14, lineY)
+    lineY += 13
+  })
+
+setText('#334155')
+doc.setFont('helvetica', 'bold').setFontSize(9)
+doc.text('Defences configured at report time:', M + 14, lineY + 6)
+setText('#64748b')
+doc.setFont('helvetica', 'normal').setFontSize(8.5)
+lineY += 20
+defenceLines.forEach((line) => {
+  doc.text(line, M + 14, lineY)
+  lineY += 13
+})
+
+y += cardHeight + 22
 
   // ── Footer ──
-  const ph = doc.internal.pageSize.getHeight()
+  // Fix: footer is built from actual attack/defence used, not hardcoded
+  const footerAttack  = capture.attackType
+  const footerDefence = enabledDefences.length ? enabledDefences[0] : 'no defence'
   setText('#94a3b8')
   doc.setFont('helvetica', 'normal').setFontSize(8)
-  doc.text('TrafficGuard — ResNet18 traffic-congestion classifier · FGSM attack + spatial-smoothing defence', M, ph - 24)
+  doc.text(
+    `TrafficGuard · ResNet18 traffic-congestion classifier · ${footerAttack} attack · ${footerDefence}`,
+    M, H - 24
+  )
+  doc.text('COMP47250 · Project P14 · UCD', W - M, H - 24, { align: 'right' })
 
   doc.save(`TrafficGuard_Security_Report_${Date.now()}.pdf`)
 }
@@ -387,8 +468,8 @@ function drawArc(doc, cx, cy, r, startDeg, endDeg, hex, width) {
   const steps = 60
   let prev = null
   for (let i = 0; i <= steps; i++) {
-    const t = (startDeg + (endDeg - startDeg) * (i / steps)) * (Math.PI / 180)
-    const x = cx + r * Math.cos(t)
+    const t  = (startDeg + (endDeg - startDeg) * (i / steps)) * (Math.PI / 180)
+    const x  = cx + r * Math.cos(t)
     const yy = cy - r * Math.sin(t)
     if (prev) doc.line(prev.x, prev.y, x, yy)
     prev = { x, y: yy }
@@ -411,19 +492,19 @@ function sectionLabel(doc, txt, x, y) {
 
 function badge(doc, x, y, w, hex, title, sub) {
   doc.setFillColor(...hexToRgb(hex))
-  doc.roundedRect(x, y, w, 40, 5, 5, 'F')
+  doc.roundedRect(x, y, w, 44, 5, 5, 'F')
   doc.setTextColor(...hexToRgb('#ffffff'))
   doc.setFont('helvetica', 'bold').setFontSize(11)
-  doc.text(title, x + 12, y + 17)
+  doc.text(title, x + 12, y + 18)
   doc.setFont('helvetica', 'normal').setFontSize(8)
-  doc.text(sub, x + 12, y + 31)
+  doc.text(sub, x + 12, y + 33)
 }
 
 function metricCell(doc, x, y, label, value, hex) {
   doc.setTextColor(...hexToRgb('#64748b'))
   doc.setFont('helvetica', 'normal').setFontSize(7.5)
-  doc.text(label.toUpperCase(), x, y + 20)
+  doc.text(label.toUpperCase(), x, y + 22)
   doc.setTextColor(...hexToRgb(hex))
   doc.setFont('helvetica', 'bold').setFontSize(15)
-  doc.text(String(value), x, y + 40)
+  doc.text(String(value), x, y + 46)
 }

@@ -9,15 +9,14 @@ export function AttackProvider({ children }) {
     pgd: { enabled: false, epsilon: 0.1, iterations: 40 },
     deepfool: { enabled: false, maxIter: 50 },
     labelflip: { enabled: false, rate: 10 },
-    backdoor: { enabled: false },
+    deepfool: { enabled: false, epsilon: 0.1 },
   })
 
   const [defences, setDefences] = useState({
-    advtrain: { enabled: true, robustAcc: 72.3 },
-    jpeg: { enabled: false, quality: 75 },
-    smooth: { enabled: false, windowSize: 3 },
+    smooth: { enabled: true, windowSize: 3 },
+    diffusion: { enabled: false },
     rs: { enabled: false, sigma: 0.25 },
-    ensemble: { enabled: false },
+    jpeg: { enabled: false, quality: 75 },
   })
 
   const [metrics, setMetrics] = useState({
@@ -29,6 +28,9 @@ export function AttackProvider({ children }) {
 
   // Shared hand-off: the most recent attack result, consumed by the Defence Lab
   const [lastAttackResult, setLastAttackResult] = useState(null)
+
+  //
+  const [lastDefenceResult, setLastDefenceResult] = useState(null)
 
   // Persistent Attack Lab input: the uploaded/selected clean image. Lives in
   // context so it survives page switches and only clears when the user clears it.
@@ -86,7 +88,13 @@ export function AttackProvider({ children }) {
 
   return (
     <AttackContext.Provider
-      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, toggleDef, lastAttackResult, setLastAttackResult, cleanInput, setCleanInput }}
+      value={{ 
+        attacks, defences, metrics, setMetrics, 
+        toggleAttack, setEpsilon, toggleDef, 
+        lastAttackResult, setLastAttackResult,
+        lastDefenceResult, setLastDefenceResult,  // new
+        cleanInput, setCleanInput 
+      }}
     >
       {children}
     </AttackContext.Provider>

@@ -12,6 +12,11 @@ Run:
 Checkpoint: put best.pt at ../model/checkpoints/best.pt, or set TG_CHECKPOINT.
 If no checkpoint is found the server still starts on an untrained ResNet18 so the
 whole pipeline (FGSM + smoothing + dashboard) is demonstrable end-to-end.
+
+Label-flip poisoned checkpoints: put poisoned_10pct.pt / poisoned_20pct.pt /
+poisoned_40pct.pt in ../model/checkpoints/ (or set TG_CHECKPOINTS_DIR to point
+elsewhere). Any subset may be present — missing rates just report as
+"not loaded" via /compare/status and /attack/poison/labelflip.
 """
 
 from __future__ import annotations
@@ -33,10 +38,10 @@ from PIL import Image
 import ml   # all torch lives here
 
 # ── Paths (portable; relative to the repo) ────────────────────────────────────
-BASE_DIR        = Path(__file__).resolve().parent.parent
-CHECKPOINT_PATH = Path(os.environ.get("TG_CHECKPOINT", BASE_DIR / "model" / "checkpoints" / "best.pt"))
-POISONED_PATH   = Path(os.environ.get("TG_POISONED", BASE_DIR / "model" / "checkpoints" / "poisoned.pt"))
-FRAMES_DIR      = Path(os.environ.get("TG_FRAMES", BASE_DIR / "data" / "sample_frames"))
+BASE_DIR         = Path(__file__).resolve().parent.parent
+CHECKPOINT_PATH  = Path(os.environ.get("TG_CHECKPOINT", BASE_DIR / "model" / "checkpoints" / "best.pt"))
+CHECKPOINTS_DIR  = Path(os.environ.get("TG_CHECKPOINTS_DIR", BASE_DIR / "model" / "checkpoints"))
+FRAMES_DIR       = Path(os.environ.get("TG_FRAMES", BASE_DIR / "data" / "sample_frames"))
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="TrafficGuard API", version="1.0.0")
@@ -90,8 +95,10 @@ def _startup():
     global _FRAMES
     real = ml.load_model(CHECKPOINT_PATH)
     print(f"[TrafficGuard] checkpoint loaded: {real}  ({CHECKPOINT_PATH})")
-    poisoned = ml.load_poisoned_model(POISONED_PATH)
-    print(f"[TrafficGuard] poisoned model loaded: {poisoned}  ({POISONED_PATH})")
+    poisoned_results = ml.load_all_poisoned_models(CHECKPOINTS_DIR)
+    for rate, loaded in poisoned_results.items():
+        path = CHECKPOINTS_DIR / f"poisoned_{rate}pct.pt"
+        print(f"[TrafficGuard] poisoned model ({rate}%) loaded: {loaded}  ({path})")
     print(f"[TrafficGuard] frames dir: {FRAMES_DIR}  exists={FRAMES_DIR.exists()}")
     _FRAMES = _list_frames()
     print(f"[TrafficGuard] cached {len(_FRAMES)} sample frames")
@@ -111,20 +118,27 @@ async def model_metrics():
 # ── Model comparison (clean vs poisoned) ──────────────────────────────────────
 @app.get("/compare/status")
 async def compare_status():
-    """Whether a poisoned model is available for side-by-side comparison."""
+    """Which poisoned checkpoints (10/20/40%) are available for comparison."""
     return {"clean": ml.model_meta(), "poisoned": ml.poisoned_meta()}
 
 
 @app.post("/compare/models")
 async def compare_models(payload: dict = Body(...)):
-    """Run one uploaded image through both the clean and poisoned models."""
+    """Run one uploaded image through the clean model and a poisoned model.
+
+    payload: { "image": "<b64>", "rate": 10 | 20 | 40 }  (rate defaults to 10)
+    """
     try:
         image = _b64_to_pil(payload["image"])
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"bad image: {e}"})
+    rate = int(payload.get("rate", 10))
+    if rate not in (10, 20, 40):
+        return JSONResponse(status_code=400, content={"error": "rate must be 10, 20, or 40"})
     loop = asyncio.get_running_loop()
-    r = await loop.run_in_executor(None, lambda: ml.compare_pil(image))
+    r = await loop.run_in_executor(None, lambda: ml.compare_pil(image, rate))
     return {
+        "rate":           rate,
         "clean_pred":     r["clean"]["label"],
         "clean_conf":     r["clean"]["confidence"],
         "poisoned_pred":  r["poisoned"]["label"]      if r["poisoned"] else None,
@@ -180,10 +194,18 @@ async def attack_deepfool(payload: dict = Body(...)):
 
 @app.post("/attack/poison/labelflip")
 async def attack_labelflip(payload: dict = Body(...)):
-    rate = payload.get("rate", 10)
-    return {"status": "not_implemented",
-            "message": f"Label-flip poisoning ({rate}%) is a training-time attack; "
-                       "run it offline and report the degraded accuracy."}
+    """Report the effect of label-flip poisoning at a given rate.
+
+    Label flipping is a training-time attack — there's no per-request image to
+    perturb, since the "attack" already happened when the poisoned checkpoint
+    was trained. This reports the clean-vs-poisoned validation accuracy gap
+    for whichever checkpoint (poisoned_{rate}pct.pt) is loaded.
+    """
+    rate = int(payload.get("rate", 10))
+    if rate not in (10, 20, 40):
+        return JSONResponse(status_code=400, content={"error": "rate must be 10, 20, or 40"})
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: ml.labelflip_report(rate))
 
 
 @app.post("/attack/poison/backdoor")

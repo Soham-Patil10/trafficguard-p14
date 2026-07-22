@@ -1,0 +1,9 @@
+{
+  "attack": "DeepFool",
+  "images_processed": 16,
+  "fooled": 16,
+  "fooling_rate_pct": 100.0,
+  "mean_pert_l2": 0.40396,
+  "median_pert_l2": 0.30065,
+  "mean_iters": 2.5
+}

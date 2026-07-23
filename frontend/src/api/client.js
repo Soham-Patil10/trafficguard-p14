@@ -1,7 +1,10 @@
 import axios from 'axios'
 
+// VITE_API_URL: unset in dev (defaults to the local backend); set to '' in
+// production (.env.production) so requests go same-origin to the host serving
+// this bundle.
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000',
   timeout: 30000,
 })
 

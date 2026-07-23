@@ -27,7 +27,8 @@ from datetime import datetime
 
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, FileResponse
+from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 import ml   # all torch lives here
@@ -37,6 +38,7 @@ BASE_DIR        = Path(__file__).resolve().parent.parent
 CHECKPOINT_PATH = Path(os.environ.get("TG_CHECKPOINT", BASE_DIR / "model" / "checkpoints" / "best.pt"))
 POISONED_PATH   = Path(os.environ.get("TG_POISONED", BASE_DIR / "model" / "checkpoints" / "poisoned.pt"))
 FRAMES_DIR      = Path(os.environ.get("TG_FRAMES", BASE_DIR / "data" / "sample_frames"))
+FRONTEND_DIST   = Path(os.environ.get("TG_FRONTEND", BASE_DIR / "frontend" / "dist"))
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="TrafficGuard API", version="1.0.0")
@@ -331,6 +333,10 @@ async def health():
 
 @app.get("/")
 async def root():
+    # Serve the built SPA when present (all-in-one deploy); else API info (dev).
+    index = FRONTEND_DIST / "index.html"
+    if index.is_file():
+        return FileResponse(index)
     return {"service": "TrafficGuard API", "docs": "/docs"}
 
 
@@ -410,4 +416,26 @@ async def ws_stream(websocket: WebSocket):
         pass
     finally:
         recv_task.cancel()
+
+
+# ── Serve the built frontend (all-in-one deployment) ─────────────────────────
+# When frontend/dist exists (a production build), FastAPI serves it directly so
+# one service hosts both the API and the SPA. In local dev (no build) this block
+# is skipped and the frontend runs separately on the Vite dev server.
+#
+# Registered LAST so every API route and the WebSocket above take precedence;
+# the catch-all only handles unmatched GETs (SPA client routes + static files).
+if FRONTEND_DIST.is_dir():
+    _assets = FRONTEND_DIST / "assets"
+    if _assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=_assets), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        candidate = (FRONTEND_DIST / full_path).resolve()
+        # Real file (favicon, etc.) if it exists and stays inside dist; else the
+        # SPA shell so client-side routes (/compare, /attacks, …) and refreshes work.
+        if FRONTEND_DIST.resolve() in candidate.parents and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(FRONTEND_DIST / "index.html")
  

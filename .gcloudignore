@@ -1,0 +1,34 @@
+# Controls what `gcloud run deploy --source .` uploads to Cloud Build.
+# IMPORTANT: when this file exists, gcloud ignores .gitignore — so the model
+# checkpoints (*.pt, gitignored) ARE uploaded because they're not listed here.
+
+.git
+.gitattributes
+**/__pycache__
+**/*.pyc
+
+# Node / build artifacts (frontend is rebuilt inside the image)
+node_modules
+frontend/node_modules
+frontend/dist
+
+# Large dataset and raw data — not needed at runtime
+data/Data
+data/raw
+
+# Notebooks and their checkpoints
+**/*.ipynb
+**/.ipynb_checkpoints
+
+# Spare/large model checkpoints — only best.pt + poisoned.pt are served
+model/checkpoints/best_old_backup.pt
+model/checkpoints/clean_baseline.pt
+model/checkpoints/poisoned_*.pt
+model/best.pt
+best.pt.zip
+
+# Training/experiment outputs
+attacks/adversarial_images
+attacks/models
+model/models
+scratchpad

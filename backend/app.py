@@ -50,7 +50,7 @@ app.add_middleware(
 
 # ── In-memory state ───────────────────────────────────────────────────────────
 DEFENCES = {
-    "jpeg": False, "smooth": True, "rs": False,
+    "jpeg": False, "smooth": True, "rs": False, "diffusion": False 
 }
 # Rolling metrics, updated every time an attack runs (REST or stream)
 METRICS = {"frames": 0, "flips": 0}
@@ -228,14 +228,28 @@ async def defence_apply(payload: dict = Body(...)):
         image = _b64_to_pil(payload["image"])
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"bad image: {e}"})
-    window = int(payload.get("window", 3))
-    smooth = DEFENCES["smooth"]
-    loop = asyncio.get_running_loop()
-    d = await loop.run_in_executor(None, lambda: ml.defend_pil(image, window, smooth))
+
+    defence_type = payload.get("defence", "smooth")   # frontend sends "smooth" or "diffusion"
+    window       = int(payload.get("window", 3))
+    loop         = asyncio.get_running_loop()
+
+    if defence_type == "diffusion" and DEFENCES.get("diffusion", False):
+        t_diffuse = int(payload.get("t_diffuse", 50))
+        d = await loop.run_in_executor(
+            None, lambda: ml.defend_diffusion(image, t_diffuse)
+        )
+    else:
+        # Default: spatial smoothing (existing behaviour, unchanged)
+        smooth = DEFENCES["smooth"]
+        d = await loop.run_in_executor(
+            None, lambda: ml.defend_pil(image, window, smooth)
+        )
+
     return {
         "defended_pred":  d["defended_pred"],
         "defended_conf":  d["defended_conf"],
         "defended_image": d["defended_image"],
+        "defence_used":   defence_type,
         "window":         window,
     }
 

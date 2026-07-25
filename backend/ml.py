@@ -459,4 +459,130 @@ def defend_pil(image: Image.Image, window: int = SMOOTH_WINDOW, smooth: bool = T
         "defended_probs": pred["probs"],
         "defended_image": _pixels_to_b64(x),
     }
+
+# ── Diffusion Purification Defence ────────────────────────────────────────────
+# Lazy-loaded on first call so the server starts instantly even before the
+# DDPM weights are downloaded. Subsequent calls reuse the cached objects.
+
+_ddpm_scheduler = None
+_ddpm_unet      = None
+_T_DIFFUSE      = 50          # forward diffusion steps — tune between 50–150
+_DDPM_SIZE      = 32          # CIFAR-10 DDPM input resolution
+
+_DDPM_TO_INPUT = transforms.Compose([
+    transforms.Resize((_DDPM_SIZE, _DDPM_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),  # [0,1] → [-1,1]
+])
+
+
+def _load_ddpm():
+    """Lazy-load the DDPM scheduler and UNet on first use."""
+    global _ddpm_scheduler, _ddpm_unet
+    if _ddpm_scheduler is None:
+        from diffusers import DDPMScheduler, UNet2DModel
+        print("[TrafficGuard] Loading DDPM (first run downloads ~100MB)...")
+        _ddpm_scheduler = DDPMScheduler.from_pretrained("google/ddpm-cifar10-32")
+        _ddpm_unet      = UNet2DModel.from_pretrained("google/ddpm-cifar10-32").to(DEVICE)
+        _ddpm_unet.eval()
+        print("[TrafficGuard] DDPM loaded.")
+
+
+def _ddpm_to_input(pil_image: Image.Image) -> torch.Tensor:
+    """PIL → (1, 3, 32, 32) tensor in [-1, 1] for the DDPM."""
+    return _DDPM_TO_INPUT(pil_image).unsqueeze(0).to(DEVICE)
+
+
+def _ddpm_from_output(tensor: torch.Tensor) -> Image.Image:
+    """(1, 3, 32, 32) [-1, 1] tensor → 224×224 PIL image."""
+    img = (tensor.squeeze(0).clamp(-1, 1) + 1) / 2   # [-1,1] → [0,1]
+    arr = (img.cpu().permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+    return Image.fromarray(arr).resize((224, 224), Image.LANCZOS)
+
+
+def _forward_diffuse(x0: torch.Tensor, t: int) -> torch.Tensor:
+    """
+    Single-step closed-form forward diffusion at timestep t:
+        x_t = sqrt(α̅_t) * x0 + sqrt(1 - α̅_t) * noise
+    Overwhelms the adversarial perturbation (ε ≈ 0.01–0.2) with
+    calibrated Gaussian noise.
+    """
+    noise    = torch.randn_like(x0)
+    t_tensor = torch.tensor([t], device=DEVICE).long()
+    return _ddpm_scheduler.add_noise(x0, noise, t_tensor)
+
+
+def _reverse_diffuse(x_t: torch.Tensor, t_start: int) -> torch.Tensor:
+    """
+    Reverse diffusion from t_start back to 0 using the DDPM UNet.
+    The UNet was trained on clean natural images — it has no concept of
+    adversarial noise patterns, so the reconstructed image is adversarial-free.
+    """
+    x = x_t.clone()
+    _ddpm_scheduler.set_timesteps(_ddpm_scheduler.config.num_train_timesteps)
+    reverse_timesteps = _ddpm_scheduler.timesteps[-t_start:]
+
+    with torch.no_grad():
+        for t in reverse_timesteps:
+            t_batch    = torch.tensor([t], device=DEVICE).long()
+            noise_pred = _ddpm_unet(x, t_batch).sample
+            x          = _ddpm_scheduler.step(noise_pred, t, x).prev_sample
+
+    return x
+
+
+def defend_diffusion(image: Image.Image, t_diffuse: int = _T_DIFFUSE) -> dict:
+    """
+    Full diffusion purification pipeline. Accepts an adversarial PIL image,
+    returns the defended prediction and purified image.
+
+    Used by app.py's /defence/apply endpoint when defence='diffusion'.
+    Compatible with the existing defend_pil() return shape so app.py
+    needs minimal changes.
+
+    Args:
+        image     : PIL image of the adversarially perturbed scene
+        t_diffuse : forward diffusion steps (default _T_DIFFUSE=50)
+
+    Returns same shape as defend_pil():
+        {
+          "defended_pred":  str,
+          "defended_idx":   int,
+          "defended_conf":  float,
+          "defended_probs": dict,
+          "defended_image": str (base64 JPEG),
+          "purify_time_s":  float,
+        }
+    """
+    import time
+    _load_ddpm()   # no-op after first call
+
+    t0 = time.time()
+
+    # Step 1 — preprocess for DDPM (32×32, [-1, 1])
+    x0 = _ddpm_to_input(image)
+
+    # Step 2 — forward: inject noise to overwhelm the adversarial perturbation
+    x_t = _forward_diffuse(x0, t_diffuse - 1)
+
+    # Step 3 — reverse: UNet reconstructs the clean scene
+    x_purified = _reverse_diffuse(x_t, t_diffuse)
+
+    # Step 4 — convert back to PIL (224×224)
+    purified_pil = _ddpm_from_output(x_purified)
+
+    # Step 5 — classify using the existing NormalizedResNet via _pil_to_pixels
+    # NB: _pil_to_pixels → [0,1] tensor, then NormalizedResNet applies
+    # ImageNet normalisation internally — same as every other defence in ml.py
+    x_pixels = _pil_to_pixels(purified_pil)
+    pred      = _predict_pixels(x_pixels)
+
+    return {
+        "defended_pred":  pred["label"],
+        "defended_idx":   pred["idx"],
+        "defended_conf":  pred["confidence"],
+        "defended_probs": pred["probs"],
+        "defended_image": _pixels_to_b64(x_pixels),
+        "purify_time_s":  round(time.time() - t0, 2),
+    }
  

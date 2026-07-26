@@ -12,9 +12,9 @@ export function AttackProvider({ children }) {
   })
 
   const [defences, setDefences] = useState({
-    jpeg: { enabled: false, quality: 75 },
     smooth: { enabled: true, windowSize: 3 },
     rs: { enabled: false, sigma: 0.25 },
+    diffusion: { enabled: false },
   })
 
   const [metrics, setMetrics] = useState({
@@ -26,6 +26,7 @@ export function AttackProvider({ children }) {
 
   // Shared hand-off: the most recent attack result, consumed by the Defence Lab
   const [lastAttackResult, setLastAttackResult] = useState(null)
+  const [lastDefenceResult, setLastDefenceResult] = useState(null)
 
   // Persistent Attack Lab input: the uploaded/selected clean image. Lives in
   // context so it survives page switches and only clears when the user clears it.
@@ -83,7 +84,7 @@ export function AttackProvider({ children }) {
 
   return (
     <AttackContext.Provider
-      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, toggleDef, lastAttackResult, setLastAttackResult, cleanInput, setCleanInput }}
+      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, toggleDef, lastAttackResult, setLastAttackResult, lastDefenceResult, setLastDefenceResult, cleanInput, setCleanInput }}
     >
       {children}
     </AttackContext.Provider>

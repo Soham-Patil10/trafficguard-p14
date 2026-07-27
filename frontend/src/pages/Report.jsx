@@ -16,7 +16,6 @@ const DEFENCE_NAMES = {
   smooth:    'Spatial Smoothing',
   diffusion: 'Diffusion Purification',
   rs:        'Randomised Smoothing',
-  jpeg:      'JPEG Compression',
 }
 const PRED_HEX = { Low: '#22c55e', Medium: '#f59e0b', High: '#ef4444' }
 
@@ -99,7 +98,7 @@ export default function ReportPage() {
               conf: Number(lastDefenceResult.conf),
               image: lastDefenceResult.image,
               recovered: lastDefenceResult.recovered,
-              windowSize: lastDefenceResult.windowSize,
+              windowSize: lastDefenceResult.windowSize ?? 3,
             }
           : null
 
@@ -197,7 +196,9 @@ export default function ReportPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Defence success</span>
-                <span className="font-mono text-slate-500">evaluated on download</span>
+                <span className={`font-mono font-bold ${lastDefenceResult ? (lastDefenceResult.recovered ? 'text-emerald-400' : 'text-amber-400') : 'text-slate-500'}`}>
+                  {lastDefenceResult ? (lastDefenceResult.recovered ? `RECOVERED → ${lastDefenceResult.pred}` : `NOT RECOVERED · ${lastDefenceResult.pred}`) : 'run defence first'}
+                </span>
               </div>
               <div className="text-xs text-slate-500">
                 Active attacks: {enabledAttacks.length ? enabledAttacks.join(', ') : 'none'}

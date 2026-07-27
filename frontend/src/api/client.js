@@ -5,7 +5,7 @@ import axios from 'axios'
 // this bundle.
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000',
-  timeout: 30000,
+  timeout: 120000,
 })
 
 // Model endpoints
@@ -42,9 +42,9 @@ export const getCertifiedRadius = (sigma) =>
 export const generateReport = (sessionData) =>
   api.post('/report/generate', sessionData, { responseType: 'blob' })
 
-// Defence Lab: defend an already-attacked base64 image
-export const applyDefence = (imageB64, window = 3) =>
-  api.post('/defence/apply', { image: imageB64, window })
+// Defence Lab: defend an already-attacked image
+export const applyDefence = (image, windowSize, defence = 'smooth') =>
+  api.post('/defence/apply', { image, window: windowSize, defence })
 
 // Preset test images for the Attack Lab gallery
 export const getSamples = () => api.get('/samples')

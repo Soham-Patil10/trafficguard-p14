@@ -5,15 +5,15 @@ import { useAttack } from '../context/AttackContext'
 import ImagePanel from '../components/ImagePanel'
 
 const DEFENCE_INFO = {
-  jpeg: { desc: 'Compresses input through JPEG encoding/decoding to strip high-frequency adversarial noise.', paper: 'Das et al., 2018' },
-  smooth: { desc: 'Applies spatial smoothing (median filter) to remove fine-grained perturbations.', paper: 'Xu et al., 2018' },
-  rs: { desc: 'Certifiable defense: adds Gaussian noise to inputs and votes on predictions, providing a provable robustness radius.', paper: 'Cohen et al., 2019' },
+  smooth: { desc: 'Applies a median filter across image pixels to remove fine-grained adversarial perturbations before inference.', paper: 'Xu et al., 2018' },
+  rs: { desc: 'Certifiable defence: adds Gaussian noise to inputs and votes on predictions, providing a provable robustness radius.', paper: 'Cohen et al., 2019' },
+  diffusion: { desc: 'Purifies adversarial inputs by running them through a diffusion model forward-and-reverse pass, removing perturbations through the denoising process.', paper: 'Nie et al., 2022' },
 }
 
 const stripDataUrl = (d) => (d && d.includes(',') ? d.split(',')[1] : d)
 
 export default function Defences() {
-  const { lastAttackResult, setLastAttackResult, defences, toggleDef } = useAttack()
+  const { lastAttackResult, setLastAttackResult, defences, toggleDef, setLastDefenceResult } = useAttack()
   const [running, setRunning] = useState(false)
   const [windowSize, setWindowSize] = useState(3)
   const [defended, setDefended] = useState(null)
@@ -23,14 +23,18 @@ export default function Defences() {
     if (!lastAttackResult) return
     setRunning(true); setDefended(null); setError(null)
     try {
-      const res = await applyDefence(stripDataUrl(lastAttackResult.attackImage), windowSize)
+      const activeDefence = defences.diffusion?.enabled ? 'diffusion' : 'smooth'
+      const res = await applyDefence(stripDataUrl(lastAttackResult.attackImage), windowSize, activeDefence)
       const d = res.data
-      setDefended({
+      const defenceResult = {
         image: `data:image/jpeg;base64,${d.defended_image}`,
         pred: d.defended_pred,
         conf: (d.defended_conf * 100).toFixed(1),
         recovered: d.defended_pred === lastAttackResult.cleanPred,
-      })
+        windowSize,
+      }
+      setDefended(defenceResult)
+      setLastDefenceResult(defenceResult)
     } catch (e) {
       setError(e?.message || 'request failed')
     } finally {
@@ -43,6 +47,7 @@ export default function Defences() {
     setDefended(null)
     setError(null)
     setLastAttackResult(null)
+    setLastDefenceResult(null)
   }
 
   return (

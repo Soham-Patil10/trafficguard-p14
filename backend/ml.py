@@ -586,3 +586,138 @@ def defend_diffusion(image: Image.Image, t_diffuse: int = _T_DIFFUSE) -> dict:
         "purify_time_s":  round(time.time() - t0, 2),
     }
  
+# ── Randomised Smoothing Defence ──────────────────────────────────────────────
+from scipy.stats import norm as _scipy_norm
+from scipy import stats as _scipy_stats
+from statsmodels.stats.proportion import proportion_confint as _proportion_confint
+
+# Sentinel returned when the smoothed classifier abstains
+RS_ABSTAIN = -1
+
+# Default hyperparameters — match the notebook's values
+_RS_SIGMA  = 0.25   # noise standard deviation
+_RS_N0     = 100    # samples for prediction pass (cheap)
+_RS_N      = 256    # samples for certification pass
+            # 256 balances speed (~1s per image on GPU) vs radius tightness
+            # increase to 1000 in the notebook for final report numbers
+_RS_ALPHA  = 0.001  # failure probability (99.9% confidence)
+
+
+def _rs_sample_counts(x: torch.Tensor, n: int, sigma: float) -> torch.Tensor:
+    """
+    Run n noisy forward passes through the NormalizedResNet.
+    Returns a vote count vector of shape (3,) — how many times each class won.
+
+    Batched in chunks of 64 to avoid OOM on the laptop GPU.
+    NormalizedResNet handles ImageNet normalisation internally, so we add noise
+    directly in [0,1] pixel space before the model — keeping sigma consistent
+    across all three channels.
+    """
+    counts    = torch.zeros(3, dtype=torch.long)
+    batch_sz  = 64
+    remaining = n
+    model     = get_model()
+
+    with torch.no_grad():
+        while remaining > 0:
+            this_batch = min(batch_sz, remaining)
+            noise      = torch.randn(this_batch, *x.shape[1:], device=DEVICE) * sigma
+            x_noisy    = (x.expand(this_batch, -1, -1, -1) + noise).clamp(0, 1)
+            preds      = model(x_noisy).argmax(dim=1).cpu()
+            for p in preds:
+                counts[p] += 1
+            remaining -= this_batch
+
+    return counts
+
+
+def defend_randomised_smoothing(
+    image: Image.Image,
+    sigma:  float = _RS_SIGMA,
+    n0:     int   = _RS_N0,
+    n:      int   = _RS_N,
+    alpha:  float = _RS_ALPHA,
+) -> dict:
+    """
+    Randomised smoothing defence — Cohen et al., ICML 2019.
+
+    Runs the CERTIFY algorithm (Algorithm 2 from the paper):
+      1. N0 noisy passes to identify the candidate top class c_A
+      2. N noisy passes to estimate p_A (Clopper-Pearson lower bound)
+      3. Compute certified L2 radius R = sigma * Phi_inverse(p_A)
+      4. Abstain if p_A <= 0.5 (cannot certify)
+
+    Args:
+        image : PIL image (RGB) — the adversarially attacked image
+        sigma : Gaussian noise std dev (default 0.25)
+        n0    : cheap prediction samples (default 100)
+        n     : certification samples (default 256)
+        alpha : failure probability (default 0.001 = 99.9% confidence)
+
+    Returns same shape as defend_pil() plus certified_radius and abstained:
+        {
+          "defended_pred"  : str or "ABSTAIN",
+          "defended_idx"   : int or -1,
+          "defended_conf"  : float,
+          "defended_probs" : dict,
+          "defended_image" : str (base64 JPEG — the ORIGINAL image, unchanged),
+          "certified_radius": float (0.0 if abstained),
+          "abstained"      : bool,
+          "sigma"          : float,
+          "n_samples"      : int,
+        }
+
+    Note on defended_image:
+        Unlike spatial smoothing or diffusion purification, randomised smoothing
+        does NOT modify the image — the defence is entirely in how the model
+        uses it (majority voting). We return the original image as defended_image
+        so the frontend still has something to display, but the visual will be
+        identical to the attacked image. Aryan should display the certified_radius
+        as the key output in the Defence Lab UI, not a before/after image diff.
+    """
+    x = _pil_to_pixels(image)
+
+    # ── Stage 1: identify candidate top class with N0 cheap samples ───────────
+    counts0 = _rs_sample_counts(x, n0, sigma)
+    c_A     = int(counts0.argmax())
+
+    # ── Stage 2: estimate p_A with N samples ──────────────────────────────────
+    counts1 = _rs_sample_counts(x, n, sigma)
+    k_A     = int(counts1[c_A])   # votes for c_A out of n
+
+    # ── Clopper-Pearson lower bound on the true win probability ───────────────
+    # proportion_confint returns (lower, upper); alpha=2*alpha per Cohen App. C
+    p_A_lower = _proportion_confint(k_A, n, alpha=2 * alpha, method="beta")[0]
+
+    # ── Certified radius and abstention decision ───────────────────────────────
+    if p_A_lower > 0.5:
+        radius    = float(sigma * _scipy_norm.ppf(p_A_lower))
+        pred_idx  = c_A
+        pred_label = IDX_TO_LABEL[c_A]
+        abstained = False
+    else:
+        radius    = 0.0
+        pred_idx  = RS_ABSTAIN
+        pred_label = "ABSTAIN"
+        abstained = True
+
+    # Confidence = p_A_lower (the certified lower bound on the win probability)
+    # This is more meaningful than a raw softmax confidence for a smoothed classifier
+    conf = round(float(p_A_lower), 4) if not abstained else 0.0
+
+    # Probs from the N-sample counts (empirical, not certified)
+    total_votes = int(counts1.sum())
+    emp_probs   = {CLASS_NAMES[i]: round(float(counts1[i]) / total_votes, 4)
+                   for i in range(3)}
+
+    return {
+        "defended_pred":    pred_label,
+        "defended_idx":     pred_idx,
+        "defended_conf":    conf,
+        "defended_probs":   emp_probs,
+        "defended_image":   _pixels_to_b64(x),  # original image, visually unchanged
+        "certified_radius": round(radius, 4),
+        "abstained":        abstained,
+        "sigma":            sigma,
+        "n_samples":        n,
+    }

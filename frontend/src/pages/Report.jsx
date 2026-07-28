@@ -94,11 +94,15 @@ export default function ReportPage() {
         // instead of re-running it, so the report matches what the dashboard showed
         const defence = lastDefenceResult
           ? {
-              pred: lastDefenceResult.pred,
-              conf: Number(lastDefenceResult.conf),
-              image: lastDefenceResult.image,
-              recovered: lastDefenceResult.recovered,
-              windowSize: lastDefenceResult.windowSize ?? 3,
+              pred:            lastDefenceResult.pred,
+              conf:            Number(lastDefenceResult.conf),
+              image:           lastDefenceResult.image,
+              recovered:       lastDefenceResult.recovered,
+              windowSize:      lastDefenceResult.windowSize ?? 3,
+              certifiedRadius: lastDefenceResult.certifiedRadius ?? null,
+              abstained:       lastDefenceResult.abstained ?? false,
+              sigma:           lastDefenceResult.sigma ?? null,
+              nSamples:        lastDefenceResult.nSamples ?? null,
             }
           : null
 
@@ -253,8 +257,8 @@ export default function ReportPage() {
 // ── PDF builder ───────────────────────────────────────────────────────────────
 function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, attackSucceeded, attacks, defences }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
-  const W  = doc.internal.pageSize.getWidth()   // 595
-  const H  = doc.internal.pageSize.getHeight()  // 842
+  const W  = doc.internal.pageSize.getWidth()
+  const H  = doc.internal.pageSize.getHeight()
   const M  = 40
   const CW = W - M * 2
 
@@ -262,16 +266,33 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
   const setDraw = (hex) => doc.setDrawColor(...hexToRgb(hex))
   const setText = (hex) => doc.setTextColor(...hexToRgb(hex))
 
-  // guard: start a new page if y would overflow
   const checkPage = (y, needed = 60) => {
-    if (y + needed > H - 40) {
-      doc.addPage()
-      return 40
-    }
+    if (y + needed > H - 40) { doc.addPage(); return 40 }
     return y
   }
 
-  // ── Header band ──
+  // helper: wrap and print a block of body text, returns new y
+  const printBody = (text, x, startY, maxWidth, lineHeight = 13) => {
+    const lines = doc.splitTextToSize(text, maxWidth)
+    setText('#475569')
+    doc.setFont('helvetica', 'normal').setFontSize(8.5)
+    doc.text(lines, x, startY)
+    return startY + lines.length * lineHeight
+  }
+
+  // ── Risk rating ──────────────────────────────────────────────────────────
+  const asr = typeof metrics.asr === 'number' ? metrics.asr : null
+  const riskLabel  = asr == null ? 'UNKNOWN' : asr > 70 ? 'HIGH' : asr > 40 ? 'MEDIUM' : 'LOW'
+  const riskColor  = asr == null ? '#64748b' : asr > 70 ? '#ef4444' : asr > 40 ? '#f59e0b' : '#22c55e'
+  const riskExpl   = asr == null
+    ? 'No attack data recorded this session.'
+    : asr > 70
+    ? 'The model is highly vulnerable. Adversarial attacks succeed at a rate exceeding 70%, posing a significant risk in deployment.'
+    : asr > 40
+    ? 'The model shows moderate vulnerability. Attacks succeed in 40-70% of cases, warranting defensive hardening before deployment.'
+    : 'The model demonstrates reasonable robustness. Attack success rate is below 40%, though further hardening is still recommended.'
+
+  // ── Header band ──────────────────────────────────────────────────────────
   setFill('#0f172a')
   doc.rect(0, 0, W, 84, 'F')
   setText('#f1f5f9')
@@ -284,27 +305,48 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
   const stamp = new Date().toLocaleString()
   doc.text(`Generated: ${stamp}`, W - M, 40, { align: 'right' })
   doc.text(`Capture: ${capture.fileName} (${capture.source})`, W - M, 56, { align: 'right' })
-  doc.text('COMP47250 · Project P14', W - M, 72, { align: 'right' })
+  doc.text('COMP47250 · Project P14 · UCD', W - M, 72, { align: 'right' })
 
   let y = 110
 
-  // ── Section 1: ASR gauge + verdicts ──
+  // ── Section 0: Executive Summary ─────────────────────────────────────────
+  sectionLabel(doc, 'EXECUTIVE SUMMARY', M, y); y += 14
+  const summaryH = 100
+  card(doc, M, y, CW, summaryH)
+
+  // Risk badge inline
+  setFill(riskColor)
+  doc.roundedRect(M + 14, y + 12, 70, 22, 4, 4, 'F')
+  setText('#ffffff')
+  doc.setFont('helvetica', 'bold').setFontSize(10)
+  doc.text(`RISK: ${riskLabel}`, M + 49, y + 26, { align: 'center' })
+
+  setText('#334155')
+  doc.setFont('helvetica', 'bold').setFontSize(9)
+  doc.text('TrafficGuard — ResNet18 Traffic Congestion Classifier', M + 94, y + 20)
+  setText('#475569')
+  doc.setFont('helvetica', 'normal').setFontSize(8)
+  doc.text('MIO-TCD dataset · Low / Medium / High congestion classes · COMP47250 Project P14', M + 94, y + 33)
+
+  const summaryText = `This report documents an adversarial robustness audit of a ResNet18-based traffic congestion classifier. The model was subjected to evasion attacks (${capture.attackType}, eps=${capture.epsilon}) and evaluated against defensive mechanisms (${enabledDefences.length ? enabledDefences.join(', ') : 'none active'}). Results are presented below for security review and deployment risk assessment.`
+  printBody(summaryText, M + 14, y + 52, CW - 28)
+  y += summaryH + 22
+
+  // ── Section 1: ASR gauge + verdicts ──────────────────────────────────────
+  y = checkPage(y, 180)
   sectionLabel(doc, 'ATTACK SUMMARY', M, y); y += 14
   const rowTop = y
   const colW   = (CW - 20) / 2
 
-  // left card: ASR gauge
   card(doc, M, rowTop, colW, 160)
   const cx = M + colW / 2
   const cy = rowTop + 100
   const R  = 52
-  // Fix: arc goes left-to-right (180→0 for background, then fill from 180 forward)
   drawArc(doc, cx, cy, R, 180, 0, '#e2e8f0', 12)
-  const a = typeof metrics.asr === 'number' ? metrics.asr : null
-  if (a != null) drawArc(doc, cx, cy, R, 180, 180 - (a / 100) * 180, asrColor(a), 12)
-  setText(asrColor(a))
+  if (asr != null) drawArc(doc, cx, cy, R, 180, 180 - (asr / 100) * 180, asrColor(asr), 12)
+  setText(asrColor(asr))
   doc.setFont('helvetica', 'bold').setFontSize(22)
-  doc.text(a == null ? 'N/A' : `${a.toFixed(1)}%`, cx, cy - 4, { align: 'center' })
+  doc.text(asr == null ? 'N/A' : `${asr.toFixed(1)}%`, cx, cy - 4, { align: 'center' })
   setText('#64748b')
   doc.setFont('helvetica', 'normal').setFontSize(7.5)
   doc.text('LIVE ATTACK SUCCESS RATE', cx, cy + 14, { align: 'center' })
@@ -312,7 +354,6 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
   doc.setFontSize(9)
   doc.text('Live ASR Meter', M + 12, rowTop + 20)
 
-  // right card: verdicts
   const rx = M + colW + 20
   card(doc, rx, rowTop, colW, 160)
   setText('#334155')
@@ -325,7 +366,7 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
     attackSucceeded ? 'ATTACK SUCCEEDED' : 'ATTACK FAILED',
     attackSucceeded
       ? `prediction flipped  ${capture.cleanPred} -> ${capture.attackPred}`
-      : `no flip — stayed ${capture.cleanPred}`
+      : `no flip - stayed ${capture.cleanPred}`
   )
   const defOk = defence ? defence.recovered : null
   badge(
@@ -333,53 +374,79 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
     defence == null ? '#64748b' : defOk ? '#22c55e' : '#f59e0b',
     defence == null ? 'DEFENCE NOT EVALUATED' : defOk ? 'DEFENCE RECOVERED' : 'DEFENCE DID NOT RECOVER',
     defence == null
-      ? 'backend offline at download time'
+      ? 'run defence in Defence Lab before generating report'
       : defOk
-      ? `recovered to ${defence.pred} (${defence.conf.toFixed(1)}%)`
-      : `still ${defence.pred} (${defence.conf.toFixed(1)}%)`
+      ? `recovered to ${defence.pred} (${Number(defence.conf).toFixed(1)}%)`
+      : `still ${defence.pred} (${Number(defence.conf).toFixed(1)}%)`
   )
 
   y = rowTop + 160 + 22
 
-  // ── Section 2: attack & defence details ──
-  y = checkPage(y, 80)
-  sectionLabel(doc, 'ATTACK & DEFENCE PERFORMED', M, y); y += 14
-  card(doc, M, y, CW, 70)
-  setText('#334155')
-  doc.setFont('helvetica', 'bold').setFontSize(10)
-  doc.text(`Attack:   ${capture.attackType}  (epsilon = ${capture.epsilon})`, M + 14, y + 22)
+  // ── Section 2: Attack details ─────────────────────────────────────────────
+  y = checkPage(y, 120)
+  sectionLabel(doc, 'ATTACK DETAILS', M, y); y += 14
+  card(doc, M, y, CW, 110)
 
-  // Fix: dynamically build defence line from what's actually enabled
-  const activeDefenceLine = enabledDefences.length
-    ? enabledDefences.join(', ')
-    : 'none'
-  const defLineDetail = defence
-    ? `Defence:  Spatial Smoothing (window ${defence.windowSize})`
-    : `Defence:  ${activeDefenceLine}`
-  doc.text(defLineDetail, M + 14, y + 42)
+  setText('#334155')
+  doc.setFont('helvetica', 'bold').setFontSize(9)
+  doc.text(`${capture.attackType}  (epsilon = ${capture.epsilon})`, M + 14, y + 18)
+
+  const attackDescriptions = {
+    FGSM:      'Fast Gradient Sign Method (FGSM) is a single-step evasion attack that perturbs each pixel by a fixed epsilon in the direction of the loss gradient. It is computationally cheap and effective, making it a standard baseline for robustness evaluation. The attack is untargeted — it pushes the prediction away from the correct class without specifying a target class.',
+    PGD:       'Projected Gradient Descent (PGD) is an iterative evasion attack that takes multiple small gradient steps, projecting back into the epsilon-ball after each step. It is strictly stronger than FGSM at the same epsilon and is considered the gold standard for adversarial robustness evaluation (Madry et al., 2018).',
+    DeepFool:  'DeepFool (Moosavi-Dezfooli et al., 2016) finds the minimal L2 perturbation needed to cross the nearest decision boundary. Unlike FGSM/PGD which use a fixed epsilon budget, DeepFool adapts the perturbation magnitude per image. The returned L2 norm is a per-image robustness score — smaller values indicate the model is easier to fool.',
+    'Label Flipping': 'Label Flipping is a data poisoning attack applied at training time. A fraction of training labels are flipped to incorrect classes, degrading model reliability from within. Unlike evasion attacks, this cannot be applied to a deployed model — it requires access to the training pipeline.',
+  }
+  const attackDesc = attackDescriptions[capture.attackType] ?? `${capture.attackType} attack applied at epsilon = ${capture.epsilon}.`
+  printBody(attackDesc, M + 14, y + 32, CW - 28, 12)
 
   setText('#64748b')
   doc.setFont('helvetica', 'normal').setFontSize(8)
-  // Fix: wrap the active defences text properly
-  const allAttacksTxt = `Active attacks: ${enabledAttacks.length ? enabledAttacks.join(', ') : 'none'}`
-  const allDefencesTxt = `Active defences: ${activeDefenceLine}`
-  doc.text(allAttacksTxt, M + 14, y + 58)
-  doc.text(allDefencesTxt, W - M - 14, y + 58, { align: 'right' })
-  y += 70 + 22
+  doc.text(`Attack type: untargeted evasion  |  epsilon: ${capture.epsilon}  |  clean pred: ${capture.cleanPred}  |  attacked pred: ${capture.attackPred}`, M + 14, y + 98)
+  y += 110 + 22
 
-  // ── Section 3: frame comparison ──
+  // ── Section 3: Defence details ────────────────────────────────────────────
+  y = checkPage(y, 120)
+  sectionLabel(doc, 'DEFENCE DETAILS', M, y); y += 14
+  card(doc, M, y, CW, 110)
+
+  const activeDefenceName = enabledDefences.length ? enabledDefences[0] : 'None'
+  setText('#334155')
+  doc.setFont('helvetica', 'bold').setFontSize(9)
+  doc.text(`${activeDefenceName}`, M + 14, y + 18)
+
+  const defenceDescriptions = {
+    'Spatial Smoothing':       `Spatial smoothing applies a ${defence?.windowSize ?? 3}x${defence?.windowSize ?? 3} median filter to the input image before inference. The median filter replaces each pixel with the median value of its neighbours, which destroys the fine-grained high-frequency perturbations introduced by gradient-based attacks. It is computationally cheap and requires no model retraining (Xu et al., 2018).`,
+    'Randomised Smoothing':    `Randomised smoothing (Cohen et al., 2019) adds Gaussian noise (sigma=${defence?.sigma ?? 0.25}) to the input n=${defence?.nSamples ?? 256} times and takes a majority vote across predictions. It provides a certifiable robustness guarantee: the model is provably correct for any perturbation with L2 norm smaller than the certified radius (${defence?.certifiedRadius != null ? defence.certifiedRadius : 'N/A'}). If no class achieves an absolute majority the classifier abstains.`,
+    'Diffusion Purification':  'Diffusion purification (Nie et al., 2022) runs the adversarial image through a forward-and-reverse diffusion process using a pre-trained DDPM. The forward pass adds calibrated Gaussian noise that overwhelms the adversarial perturbation; the reverse pass uses the denoising UNet to reconstruct a clean version of the scene. The purified image is then classified by the ResNet18.',
+    'None':                    'No defence was applied during this session. The model was evaluated on adversarial examples without any defensive pre-processing.',
+  }
+  const defenceDesc = defenceDescriptions[activeDefenceName] ?? `${activeDefenceName} defence applied.`
+  printBody(defenceDesc, M + 14, y + 32, CW - 28, 12)
+
+  if (defence) {
+    const defSummary = defence.certifiedRadius != null
+      ? `Defended pred: ${defence.pred}  |  conf: ${Number(defence.conf).toFixed(1)}%  |  certified radius: ${defence.certifiedRadius}  |  recovered: ${defence.recovered ? 'yes' : 'no'}`
+      : `Defended pred: ${defence.pred}  |  conf: ${Number(defence.conf).toFixed(1)}%  |  recovered: ${defence.recovered ? 'yes' : 'no'}`
+    setText('#64748b')
+    doc.setFont('helvetica', 'normal').setFontSize(8)
+    doc.text(defSummary, M + 14, y + 98)
+  }
+  y += 110 + 22
+
+  // ── Section 4: Frame comparison ───────────────────────────────────────────
   y = checkPage(y, 180)
   sectionLabel(doc, 'FRAME COMPARISON — CLEAN vs ATTACKED vs DEFENDED', M, y); y += 16
   const panels = [
-    { label: 'CLEAN INPUT',          color: '#22c55e', img: capture.cleanImage,  pred: capture.cleanPred,  conf: capture.cleanConf },
+    { label: 'CLEAN INPUT',                    color: '#22c55e', img: capture.cleanImage,  pred: capture.cleanPred,  conf: capture.cleanConf },
     { label: `ATTACKED (${capture.attackType})`, color: '#ef4444', img: capture.attackImage, pred: capture.attackPred, conf: capture.attackConf },
   ]
   if (defence) {
-    panels.push({ label: 'DEFENDED (SMOOTHED)', color: '#0ea5e9', img: defence.image, pred: defence.pred, conf: defence.conf })
+    panels.push({ label: 'DEFENDED', color: '#0ea5e9', img: defence.image, pred: defence.pred, conf: defence.conf })
   }
-  const n    = panels.length
+  const np   = panels.length
   const gap  = 16
-  const pW   = (CW - gap * (n - 1)) / n
+  const pW   = (CW - gap * (np - 1)) / np
   const pImgH = 110
   panels.forEach((p, i) => {
     const px = M + i * (pW + gap)
@@ -399,7 +466,7 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
     }
     setDraw('#e2e8f0')
     doc.rect(px, y + 16 + pImgH, pW, 24)
-    setText(PRED_HEX[p.pred] ?? '#334155')
+    setText(PRED_HEX[p.pred] ?? '#64748b')
     doc.setFont('helvetica', 'bold').setFontSize(9)
     doc.text(String(p.pred).toUpperCase(), px + 6, y + 16 + pImgH + 16)
     setText('#64748b')
@@ -408,19 +475,27 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
   })
   y += 16 + pImgH + 24 + 28
 
-  // ── Section 4: session metrics ──
-  y = checkPage(y, 80)
+  // ── Section 5: Session metrics ────────────────────────────────────────────
+  y = checkPage(y, 100)
   sectionLabel(doc, 'SESSION METRICS', M, y); y += 14
-  // Fix: taller card so values don't clip
   card(doc, M, y, CW, 70)
   const fmt = (v) => (typeof v === 'number' ? `${v.toFixed(1)}%` : 'N/A')
-  metricCell(doc, M + 14,              y, 'Clean Accuracy',    fmt(metrics.cleanAcc),       '#22c55e')
-  metricCell(doc, M + 14 + CW / 4,    y, 'Robust Accuracy',   fmt(metrics.robustAcc),      '#f59e0b')
-  metricCell(doc, M + 14 + CW / 4 * 2,y, 'Attack Success Rate',fmt(metrics.asr),           '#ef4444')
-  metricCell(doc, M + 14 + CW / 4 * 3,y, 'Certified Radius',  metrics.certifiedRadius ?? 'N/A', '#0ea5e9')
-  y += 70 + 22
+  metricCell(doc, M + 14,               y, 'Clean Accuracy',     fmt(metrics.cleanAcc),        '#22c55e')
+  metricCell(doc, M + 14 + CW / 4,     y, 'Robust Accuracy',    fmt(metrics.robustAcc),       '#f59e0b')
+  metricCell(doc, M + 14 + CW / 4 * 2, y, 'Attack Success Rate', fmt(metrics.asr),            '#ef4444')
+  metricCell(doc, M + 14 + CW / 4 * 3, y, 'Certified Radius',
+    defence?.certifiedRadius != null ? String(defence.certifiedRadius) : (metrics.certifiedRadius ?? 'N/A'),
+    '#0ea5e9')
+  y += 70 + 14
 
-  // ── Section 5: configuration snapshot ──
+  // Metrics interpretation
+  y = checkPage(y, 60)
+  card(doc, M, y, CW, 52)
+  const metricsInterp = `An ASR above 70% indicates high model vulnerability requiring urgent defensive hardening. Robust accuracy estimates model performance under attack. The certified radius (randomised smoothing only) guarantees correct predictions for all perturbations with L2 norm below this threshold.`
+  printBody(metricsInterp, M + 14, y + 16, CW - 28, 12)
+  y += 52 + 22
+
+  // ── Section 6: Configuration snapshot ────────────────────────────────────
   y = checkPage(y, 120)
   sectionLabel(doc, 'CONFIGURATION SNAPSHOT', M, y); y += 14
 
@@ -431,12 +506,10 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
       : v.rate != null ? `rate=${v.rate}%` : ''
     return `${name}${detail ? ` (${detail})` : ''} - ${v.enabled ? 'ON' : 'off'}`
   })
-
   const defenceLines = Object.entries(defences).map(([k, v]) => {
     const name = DEFENCE_NAMES[k] ?? k
     return `${name} - ${v.enabled ? 'ON' : 'off'}`
   })
-
   const cardHeight = 28 + (attackLines.length * 13) + 16 + (defenceLines.length * 13) + 14
   card(doc, M, y, CW, cardHeight)
 
@@ -446,32 +519,45 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
   setText('#64748b')
   doc.setFont('helvetica', 'normal').setFontSize(8.5)
   let lineY = y + 32
-  attackLines.forEach((line) => {
-    doc.text(line, M + 14, lineY)
-    lineY += 13
-  })
+  attackLines.forEach((line) => { doc.text(line, M + 14, lineY); lineY += 13 })
 
-setText('#334155')
-doc.setFont('helvetica', 'bold').setFontSize(9)
-doc.text('Defences configured at report time:', M + 14, lineY + 6)
-setText('#64748b')
-doc.setFont('helvetica', 'normal').setFontSize(8.5)
-lineY += 20
-defenceLines.forEach((line) => {
-  doc.text(line, M + 14, lineY)
-  lineY += 13
-})
+  setText('#334155')
+  doc.setFont('helvetica', 'bold').setFontSize(9)
+  doc.text('Defences configured at report time:', M + 14, lineY + 6)
+  setText('#64748b')
+  doc.setFont('helvetica', 'normal').setFontSize(8.5)
+  lineY += 20
+  defenceLines.forEach((line) => { doc.text(line, M + 14, lineY); lineY += 13 })
+  y += cardHeight + 22
 
-y += cardHeight + 22
+  // ── Section 7: Conclusions & Recommendations ──────────────────────────────
+  y = checkPage(y, 140)
+  sectionLabel(doc, 'CONCLUSIONS & RECOMMENDATIONS', M, y); y += 14
+  card(doc, M, y, CW, 130)
 
-  // ── Footer ──
-  // Fix: footer is built from actual attack/defence used, not hardcoded
-  const footerAttack  = capture.attackType
-  const footerDefence = enabledDefences.length ? enabledDefences[0] : 'no defence'
+  setText('#334155')
+  doc.setFont('helvetica', 'bold').setFontSize(9)
+  doc.text('Overall risk verdict:', M + 14, y + 18)
+  setFill(riskColor)
+  doc.roundedRect(M + 110, y + 8, 50, 16, 3, 3, 'F')
+  setText('#ffffff')
+  doc.setFont('helvetica', 'bold').setFontSize(8)
+  doc.text(riskLabel, M + 135, y + 19, { align: 'center' })
+
+  const conclusionText = `Attack effectiveness: ${capture.attackType} at epsilon=${capture.epsilon} ${attackSucceeded ? 'successfully flipped' : 'failed to flip'} the prediction from ${capture.cleanPred} to ${capture.attackPred}. ${defence ? `Defence outcome: ${activeDefenceName} ${defence.recovered ? 'successfully recovered' : 'failed to recover'} the correct prediction.` : 'No defence was evaluated.'}`
+  y = printBody(conclusionText, M + 14, y + 36, CW - 28, 12) + 8
+
+  const recText = defence?.certifiedRadius != null && defence.certifiedRadius > 0
+    ? `Recommendation: Randomised smoothing provides a certifiable robustness guarantee (radius=${defence.certifiedRadius}) but increases inference time significantly. For latency-sensitive deployments, spatial smoothing offers a practical lightweight alternative. Adversarial training on the training set is recommended as a complementary hardening measure.`
+    : `Recommendation: Spatial smoothing provides partial recovery at low computational cost and is suitable for real-time deployment. For stronger guarantees, randomised smoothing (Cohen et al., 2019) offers provable robustness bounds. Adversarial training on the training set is recommended as a complementary hardening measure.`
+  printBody(recText, M + 14, y, CW - 28, 12)
+  y += 130 + 22
+
+  // ── Footer ────────────────────────────────────────────────────────────────
   setText('#94a3b8')
   doc.setFont('helvetica', 'normal').setFontSize(8)
   doc.text(
-    `TrafficGuard · ResNet18 traffic-congestion classifier · ${footerAttack} attack · ${footerDefence}`,
+    `TrafficGuard · ResNet18 · ${capture.attackType} attack · ${enabledDefences.length ? enabledDefences[0] : 'no defence'}`,
     M, H - 24
   )
   doc.text('COMP47250 · Project P14 · UCD', W - M, H - 24, { align: 'right' })

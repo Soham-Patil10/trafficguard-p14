@@ -314,7 +314,7 @@ export default function AttackLab() {
           {!cleanInput
             ? 'Upload or pick a test image to run attacks'
             : selectedAttackId
-            ? `Will run ${selectedAttackId.toUpperCase()} on the backend (priority: PGD > DeepFool > FGSM)`
+            ? `Running ${selectedAttackId.toUpperCase()} on the backend`
             : 'Enable an evasion attack (FGSM, PGD or DeepFool) to run'}
         </span>
       </div>

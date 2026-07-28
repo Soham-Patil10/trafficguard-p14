@@ -36,6 +36,10 @@ export default function Defences() {
         conf: (d.defended_conf * 100).toFixed(1),
         recovered: d.defended_pred === lastAttackResult.cleanPred,
         windowSize,
+        certifiedRadius: d.certified_radius ?? null,
+        abstained: d.abstained ?? false,
+        sigma: d.sigma ?? null,
+        nSamples: d.n_samples ?? null,
       }
       setDefended(defenceResult)
       setLastDefenceResult(defenceResult)
@@ -62,7 +66,7 @@ export default function Defences() {
         </div>
         <div>
           <h2 className="text-2xl font-bold">Defence Lab</h2>
-          <p className="text-slate-400 text-sm">Take the attacked image from the Attack Lab and recover it with spatial smoothing</p>
+          <p className="text-slate-400 text-sm">Take the attacked image from the Attack Lab and recover it by applying one of the defences.</p>
         </div>
       </div>
 
@@ -126,6 +130,14 @@ export default function Defences() {
                   &nbsp;·&nbsp; attacked: <span className="text-red-300">{lastAttackResult.attackPred}</span>
                   &nbsp;·&nbsp; defended: <span className="text-green-300">{defended.pred}</span> ({defended.conf}%)
                 </p>
+                {defended.certifiedRadius != null && (
+                  <p className="text-slate-400 mt-1">
+                    Certified radius: <span className="font-mono text-sky-400">{defended.certifiedRadius}</span>
+                    &nbsp;·&nbsp; σ = <span className="font-mono text-sky-400">{defended.sigma ?? 0.25}</span>
+                    &nbsp;·&nbsp; n = <span className="font-mono text-sky-400">{defended.nSamples ?? 256}</span>
+                    {defended.abstained && <span className="text-amber-400 ml-2">· ABSTAINED</span>}
+                  </p>
+                )}
               </div>
             </div>
           )}

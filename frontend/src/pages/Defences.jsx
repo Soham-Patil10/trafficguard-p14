@@ -23,7 +23,11 @@ export default function Defences() {
     if (!lastAttackResult) return
     setRunning(true); setDefended(null); setError(null)
     try {
-      const activeDefence = defences.diffusion?.enabled ? 'diffusion' : 'smooth'
+      const activeDefence = defences.diffusion?.enabled
+      ? 'diffusion'
+      : defences.rs?.enabled
+      ? 'rs'
+      : 'smooth'
       const res = await applyDefence(stripDataUrl(lastAttackResult.attackImage), windowSize, activeDefence)
       const d = res.data
       const defenceResult = {
@@ -138,7 +142,9 @@ export default function Defences() {
             return (
               <div key={key} className={`rounded-xl border p-4 transition-all ${defence.enabled ? 'bg-emerald-500/5 border-emerald-500/25' : 'bg-slate-800/60 border-slate-700/40'}`}>
                 <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-bold text-slate-200 uppercase font-mono">{key}</h4>
+                  <h4 className="text-sm font-bold text-slate-200 uppercase font-mono">
+                    {key === 'smooth' ? 'Spatial Smoothing' : key === 'rs' ? 'Randomised Smoothing' : 'Diffusion Purification'}
+                  </h4>
                   <div className="flex items-center gap-2">
                     {key === 'smooth' && (
                       <select

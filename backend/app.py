@@ -14,6 +14,7 @@ If no checkpoint is found the server still starts on an untrained ResNet18 so th
 whole pipeline (FGSM + smoothing + dashboard) is demonstrable end-to-end.
 """
 
+
 from __future__ import annotations
 
 import os
@@ -50,7 +51,7 @@ app.add_middleware(
 
 # ── In-memory state ───────────────────────────────────────────────────────────
 DEFENCES = {
-    "jpeg": False, "smooth": True, "rs": False, "diffusion": False 
+    "jpeg": False, "smooth": True, "rs": True, "diffusion": False 
 }
 # Rolling metrics, updated every time an attack runs (REST or stream)
 METRICS = {"frames": 0, "flips": 0}
@@ -229,7 +230,7 @@ async def defence_apply(payload: dict = Body(...)):
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"bad image: {e}"})
 
-    defence_type = payload.get("defence", "smooth")   # frontend sends "smooth" or "diffusion"
+    defence_type = payload.get("defence", "smooth")
     window       = int(payload.get("window", 3))
     loop         = asyncio.get_running_loop()
 
@@ -238,20 +239,42 @@ async def defence_apply(payload: dict = Body(...)):
         d = await loop.run_in_executor(
             None, lambda: ml.defend_diffusion(image, t_diffuse)
         )
+        return {
+            "defended_pred":  d["defended_pred"],
+            "defended_conf":  d["defended_conf"],
+            "defended_image": d["defended_image"],
+            "defence_used":   "diffusion",
+        }
+
+    elif defence_type == "rs" and DEFENCES.get("rs", False):
+        sigma = float(payload.get("sigma", 0.25))
+        n     = int(payload.get("n", 256))
+        d = await loop.run_in_executor(
+            None, lambda: ml.defend_randomised_smoothing(image, sigma=sigma, n=n)
+        )
+        return {
+            "defended_pred":    d["defended_pred"],
+            "defended_conf":    d["defended_conf"],
+            "defended_image":   d["defended_image"],
+            "certified_radius": d["certified_radius"],
+            "abstained":        d["abstained"],
+            "sigma":            d["sigma"],
+            "n_samples":        d["n_samples"],
+            "defence_used":     "rs",
+        }
+
     else:
-        # Default: spatial smoothing (existing behaviour, unchanged)
         smooth = DEFENCES["smooth"]
         d = await loop.run_in_executor(
             None, lambda: ml.defend_pil(image, window, smooth)
         )
-
-    return {
-        "defended_pred":  d["defended_pred"],
-        "defended_conf":  d["defended_conf"],
-        "defended_image": d["defended_image"],
-        "defence_used":   defence_type,
-        "window":         window,
-    }
+        return {
+            "defended_pred":  d["defended_pred"],
+            "defended_conf":  d["defended_conf"],
+            "defended_image": d["defended_image"],
+            "defence_used":   "smooth",
+            "window":         window,
+        }
 
 
 # Preset test images for the Attack Lab gallery (served from data/sample_frames).

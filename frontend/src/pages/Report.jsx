@@ -162,24 +162,42 @@ export default function ReportPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="grid grid-cols-2 gap-3">
-              <figure className="rounded-lg overflow-hidden border border-slate-700/30">
-                <figcaption className="bg-emerald-500/10 text-emerald-400 text-[10px] font-mono px-2 py-1">Clean</figcaption>
-                <img src={toDataUrl(capture.cleanImage)} alt="clean" className="w-full h-24 object-cover bg-slate-900" />
-                <div className="px-2 py-1 text-[11px] font-mono" style={{ color: PRED_HEX[capture.cleanPred] }}>
-                  {capture.cleanPred} · {capture.cleanConf.toFixed(1)}%
-                </div>
-              </figure>
-              <figure className="rounded-lg overflow-hidden border border-slate-700/30">
-                <figcaption className="bg-red-500/10 text-red-400 text-[10px] font-mono px-2 py-1">
-                  {capture.attackType} ε={capture.epsilon}
-                </figcaption>
-                <img src={toDataUrl(capture.attackImage)} alt="attacked" className="w-full h-24 object-cover bg-slate-900" />
-                <div className="px-2 py-1 text-[11px] font-mono" style={{ color: PRED_HEX[capture.attackPred] }}>
-                  {capture.attackPred} · {capture.attackConf.toFixed(1)}%
-                </div>
-              </figure>
-            </div>
+            <div className="grid grid-cols-3 gap-3">
+            <figure className="rounded-lg overflow-hidden border border-slate-700/30">
+              <figcaption className="bg-emerald-500/10 text-emerald-400 text-[10px] font-mono px-2 py-1">Clean</figcaption>
+              <img src={toDataUrl(capture.cleanImage)} alt="clean" className="w-full h-24 object-cover bg-slate-900" />
+              <div className="px-2 py-1 text-[11px] font-mono" style={{ color: PRED_HEX[capture.cleanPred] }}>
+                {capture.cleanPred} · {capture.cleanConf.toFixed(1)}%
+              </div>
+            </figure>
+            <figure className="rounded-lg overflow-hidden border border-slate-700/30">
+              <figcaption className="bg-red-500/10 text-red-400 text-[10px] font-mono px-2 py-1">
+                {capture.attackType} ε={capture.epsilon}
+              </figcaption>
+              <img src={toDataUrl(capture.attackImage)} alt="attacked" className="w-full h-24 object-cover bg-slate-900" />
+              <div className="px-2 py-1 text-[11px] font-mono" style={{ color: PRED_HEX[capture.attackPred] }}>
+                {capture.attackPred} · {capture.attackConf.toFixed(1)}%
+              </div>
+            </figure>
+            <figure className="rounded-lg overflow-hidden border border-slate-700/30">
+              <figcaption className="bg-sky-500/10 text-sky-400 text-[10px] font-mono px-2 py-1">Defended</figcaption>
+              {lastDefenceResult ? (
+                <>
+                  <img src={toDataUrl(lastDefenceResult.image)} alt="defended" className="w-full h-24 object-cover bg-slate-900" />
+                  <div className="px-2 py-1 text-[11px] font-mono" style={{ color: PRED_HEX[lastDefenceResult.pred] }}>
+                    {lastDefenceResult.pred} · {Number(lastDefenceResult.conf).toFixed(1)}%
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="w-full h-24 bg-slate-900 flex items-center justify-center">
+                    <span className="text-slate-600 text-[10px]">run defence first</span>
+                  </div>
+                  <div className="px-2 py-1 text-[11px] font-mono text-slate-600">—</div>
+                </>
+              )}
+            </figure>
+          </div>
 
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">

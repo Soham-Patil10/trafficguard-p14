@@ -41,6 +41,8 @@ _model = None          # NormalizedResNet in eval() mode (clean model)
 _meta = {}             # checkpoint metadata
 _poisoned_model = None # NormalizedResNet in eval() mode (label-flipped model)
 _poisoned_meta = {}    # poisoned checkpoint metadata
+_robust_model = None   # NormalizedResNet in eval() mode (adversarially-trained)
+_robust_meta = {}      # robust checkpoint metadata
 
 
 # ── Model definition ──────────────────────────────────────────────────────────
@@ -226,6 +228,52 @@ def poisoned_meta() -> dict:
         "checkpoint_loaded": _poisoned_meta.get("loaded", False),
         "epoch": _poisoned_meta.get("epoch"),
         "val_acc": round(_poisoned_meta.get("val_acc", 0.0) * 100, 2),
+    }
+
+def load_robust_model(checkpoint_path: Path | str) -> bool:
+    """Load the adversarially-trained checkpoint (best_robust.pt) into its own slot.
+
+    Mirrors load_poisoned_model: accepts a wrapped state dict, a bare state dict,
+    or a fully-pickled module. Returns True if real weights were loaded.
+    """
+    global _robust_model, _robust_meta
+    checkpoint_path = Path(checkpoint_path)
+    if not checkpoint_path.exists():
+        _robust_model = None
+        _robust_meta = {"epoch": "missing", "val_acc": 0.0, "loaded": False}
+        return False
+
+    model = NormalizedResNet(num_classes=3).to(DEVICE)
+    ckpt = torch.load(checkpoint_path, map_location=DEVICE, weights_only=False)
+    meta = {"epoch": "?", "val_acc": 0.0, "loaded": True}
+    try:
+        if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+            meta["epoch"] = ckpt.get("epoch", "?")
+            meta["val_acc"] = float(ckpt.get("val_acc", 0.0))
+            _load_state_flexible(model, ckpt["model_state_dict"])
+        elif isinstance(ckpt, dict):
+            _load_state_flexible(model, ckpt)
+        elif isinstance(ckpt, NormalizedResNet):
+            model = ckpt.to(DEVICE)
+        else:
+            model.backbone.load_state_dict(ckpt.state_dict())
+    except Exception as e:
+        print(f"[TrafficGuard] ERROR: robust checkpoint could not be loaded: {e}")
+        _robust_model = None
+        _robust_meta = {"epoch": "?", "val_acc": 0.0, "loaded": False}
+        return False
+
+    model.eval()
+    _robust_model = model
+    _robust_meta = meta
+    return True
+
+
+def robust_meta() -> dict:
+    return {
+        "checkpoint_loaded": _robust_meta.get("loaded", False),
+        "epoch": _robust_meta.get("epoch"),
+        "val_acc": round(_robust_meta.get("val_acc", 0.0) * 100, 2),
     }
 
 
@@ -458,6 +506,24 @@ def defend_pil(image: Image.Image, window: int = SMOOTH_WINDOW, smooth: bool = T
         "defended_conf":  pred["confidence"],
         "defended_probs": pred["probs"],
         "defended_image": _pixels_to_b64(x),
+    }
+
+def defend_adversarial_training(image: Image.Image) -> dict:
+    """Run an (already-attacked) image through the adversarially-trained model.
+
+    Falls back to the clean model if best_robust.pt hasn't been loaded, so the
+    Defence Lab still returns a result (flagged via 'robust_loaded': False).
+    """
+    x = _pil_to_pixels(image)
+    model = _robust_model if _robust_model is not None else get_model()
+    pred = _predict_pixels(x, model)
+    return {
+        "defended_pred":  pred["label"],
+        "defended_idx":   pred["idx"],
+        "defended_conf":  pred["confidence"],
+        "defended_probs": pred["probs"],
+        "defended_image": _pixels_to_b64(x),
+        "robust_loaded":  _robust_model is not None,
     }
 
 # ── Diffusion Purification Defence ────────────────────────────────────────────

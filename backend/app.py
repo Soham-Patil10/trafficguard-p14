@@ -38,6 +38,7 @@ import ml   # all torch lives here
 BASE_DIR        = Path(__file__).resolve().parent.parent
 CHECKPOINT_PATH = Path(os.environ.get("TG_CHECKPOINT", BASE_DIR / "model" / "checkpoints" / "best.pt"))
 POISONED_PATH   = Path(os.environ.get("TG_POISONED", BASE_DIR / "model" / "checkpoints" / "poisoned.pt"))
+ROBUST_CKPT_PATH = Path(os.environ.get("TG_ROBUST", BASE_DIR / "defences" / "checkpoints" / "best_robust.pt"))
 FRAMES_DIR      = Path(os.environ.get("TG_FRAMES", BASE_DIR / "data" / "sample_frames"))
 FRONTEND_DIST   = Path(os.environ.get("TG_FRONTEND", BASE_DIR / "frontend" / "dist"))
 
@@ -51,7 +52,7 @@ app.add_middleware(
 
 # ── In-memory state ───────────────────────────────────────────────────────────
 DEFENCES = {
-    "jpeg": False, "smooth": True, "rs": True, "diffusion": False 
+    "jpeg": False, "smooth": True, "rs": True, "diffusion": False, "adv_train": True
 }
 # Rolling metrics, updated every time an attack runs (REST or stream)
 METRICS = {"frames": 0, "flips": 0}
@@ -95,6 +96,8 @@ def _startup():
     print(f"[TrafficGuard] checkpoint loaded: {real}  ({CHECKPOINT_PATH})")
     poisoned = ml.load_poisoned_model(POISONED_PATH)
     print(f"[TrafficGuard] poisoned model loaded: {poisoned}  ({POISONED_PATH})")
+    robust = ml.load_robust_model(ROBUST_CKPT_PATH)
+    print(f"[TrafficGuard] robust model loaded: {robust}  ({ROBUST_CKPT_PATH})")
     print(f"[TrafficGuard] frames dir: {FRAMES_DIR}  exists={FRAMES_DIR.exists()}")
     _FRAMES = _list_frames()
     print(f"[TrafficGuard] cached {len(_FRAMES)} sample frames")
@@ -109,6 +112,10 @@ async def model_info():
 @app.get("/model/metrics")
 async def model_metrics():
     return _live_metrics()
+
+@app.get("/model/robust-info")
+async def model_robust_info():
+    return ml.robust_meta()
 
 
 # ── Model comparison (clean vs poisoned) ──────────────────────────────────────
@@ -261,6 +268,16 @@ async def defence_apply(payload: dict = Body(...)):
             "sigma":            d["sigma"],
             "n_samples":        d["n_samples"],
             "defence_used":     "rs",
+        }
+
+    elif defence_type == "adv_train" and DEFENCES.get("adv_train", False):
+        d = await loop.run_in_executor(None, lambda: ml.defend_adversarial_training(image))
+        return {
+            "defended_pred":  d["defended_pred"],
+            "defended_conf":  d["defended_conf"],
+            "defended_image": d["defended_image"],
+            "defence_used":   "adv_train",
+            "robust_loaded":  d["robust_loaded"],
         }
 
     else:

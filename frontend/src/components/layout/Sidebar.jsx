@@ -62,6 +62,7 @@ export default function Sidebar() {
         <div>
           <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">Defences</span>
           <div className="mt-2 space-y-2">
+            <DefenceToggle defenceName="adv_train" label="Adversarial Training" />
             <DefenceToggle defenceName="smooth" label="Spatial Smoothing" />
             <DefenceToggle defenceName="rs" label="Randomised Smoothing" />
             <DefenceToggle defenceName="diffusion" label="Diffusion Purification" />

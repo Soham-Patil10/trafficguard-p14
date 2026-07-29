@@ -12,10 +12,11 @@ export function AttackProvider({ children }) {
   })
 
   const [defences, setDefences] = useState({
-    smooth: { enabled: true, windowSize: 3 },
-    rs: { enabled: false, sigma: 0.25 },
-    diffusion: { enabled: false },
-  })
+  adv_train: { enabled: false },
+  smooth: { enabled: true, windowSize: 3 },
+  rs: { enabled: false, sigma: 0.25 },
+  diffusion: { enabled: false },
+})
 
   const [metrics, setMetrics] = useState({
     cleanAcc: null,      // filled from the backend (original model accuracy)

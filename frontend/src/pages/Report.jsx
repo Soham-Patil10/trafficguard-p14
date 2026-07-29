@@ -13,6 +13,7 @@ const ATTACK_NAMES = {
   deepfool:  'DeepFool',
 }
 const DEFENCE_NAMES = {
+  adv_train: 'Adversarial Training',
   smooth:    'Spatial Smoothing',
   diffusion: 'Diffusion Purification',
   rs:        'Randomised Smoothing',
@@ -416,6 +417,7 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
   doc.text(`${activeDefenceName}`, M + 14, y + 18)
 
   const defenceDescriptions = {
+    'Adversarial Training':  'Adversarial training (Madry et al., 2018) exposes the model to adversarial examples during training, forcing it to learn features that are robust to gradient-based perturbations. The defended prediction is produced by a separately trained hardened ResNet18 rather than by pre-processing the input.',
     'Spatial Smoothing':       `Spatial smoothing applies a ${defence?.windowSize ?? 3}x${defence?.windowSize ?? 3} median filter to the input image before inference. The median filter replaces each pixel with the median value of its neighbours, which destroys the fine-grained high-frequency perturbations introduced by gradient-based attacks. It is computationally cheap and requires no model retraining (Xu et al., 2018).`,
     'Randomised Smoothing':    `Randomised smoothing (Cohen et al., 2019) adds Gaussian noise (sigma=${defence?.sigma ?? 0.25}) to the input n=${defence?.nSamples ?? 256} times and takes a majority vote across predictions. It provides a certifiable robustness guarantee: the model is provably correct for any perturbation with L2 norm smaller than the certified radius (${defence?.certifiedRadius != null ? defence.certifiedRadius : 'N/A'}). If no class achieves an absolute majority the classifier abstains.`,
     'Diffusion Purification':  'Diffusion purification (Nie et al., 2022) runs the adversarial image through a forward-and-reverse diffusion process using a pre-trained DDPM. The forward pass adds calibrated Gaussian noise that overwhelms the adversarial perturbation; the reverse pass uses the denoising UNet to reconstruct a clean version of the scene. The purified image is then classified by the ResNet18.',

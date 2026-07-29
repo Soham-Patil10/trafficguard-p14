@@ -5,6 +5,7 @@ import { useAttack } from '../context/AttackContext'
 import ImagePanel from '../components/ImagePanel'
 
 const DEFENCE_INFO = {
+  adv_train: { desc: 'Runs the attacked image through a separately trained adversarially-hardened ResNet18. The robust model was trained on adversarial examples generated during training, making it inherently resistant to gradient-based attacks.', paper: 'Madry et al., 2018' },
   smooth: { desc: 'Applies a median filter across image pixels to remove fine-grained adversarial perturbations before inference.', paper: 'Xu et al., 2018' },
   rs: { desc: 'Certifiable defence: adds Gaussian noise to inputs and votes on predictions, providing a provable robustness radius.', paper: 'Cohen et al., 2019' },
   diffusion: { desc: 'Purifies adversarial inputs by running them through a diffusion model forward-and-reverse pass, removing perturbations through the denoising process.', paper: 'Nie et al., 2022' },
@@ -23,11 +24,13 @@ export default function Defences() {
     if (!lastAttackResult) return
     setRunning(true); setDefended(null); setError(null)
     try {
-      const activeDefence = defences.diffusion?.enabled
-      ? 'diffusion'
-      : defences.rs?.enabled
-      ? 'rs'
-      : 'smooth'
+      const activeDefence = defences.adv_train?.enabled
+        ? 'adv_train'
+        : defences.diffusion?.enabled
+        ? 'diffusion'
+        : defences.rs?.enabled
+        ? 'rs'
+        : 'smooth'
       const res = await applyDefence(stripDataUrl(lastAttackResult.attackImage), windowSize, activeDefence)
       const d = res.data
       const defenceResult = {
@@ -155,7 +158,10 @@ export default function Defences() {
               <div key={key} className={`rounded-xl border p-4 transition-all ${defence.enabled ? 'bg-emerald-500/5 border-emerald-500/25' : 'bg-slate-800/60 border-slate-700/40'}`}>
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-sm font-bold text-slate-200 uppercase font-mono">
-                    {key === 'smooth' ? 'Spatial Smoothing' : key === 'rs' ? 'Randomised Smoothing' : 'Diffusion Purification'}
+                    {key === 'adv_train' ? 'Adversarial Training'
+                      : key === 'smooth' ? 'Spatial Smoothing'
+                      : key === 'rs' ? 'Randomised Smoothing'
+                      : 'Diffusion Purification'}
                   </h4>
                   <div className="flex items-center gap-2">
                     {key === 'smooth' && (

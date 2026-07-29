@@ -37,7 +37,7 @@ import ml   # all torch lives here
 # ── Paths (portable; relative to the repo) ────────────────────────────────────
 BASE_DIR        = Path(__file__).resolve().parent.parent
 CHECKPOINT_PATH = Path(os.environ.get("TG_CHECKPOINT", BASE_DIR / "model" / "checkpoints" / "best.pt"))
-POISONED_PATH   = Path(os.environ.get("TG_POISONED", BASE_DIR / "model" / "checkpoints" / "poisoned.pt"))
+POISONED_PATH   = Path(os.environ.get("TG_POISONED", BASE_DIR / "model" / "checkpoints" / "poisoned_10.pt"))
 ROBUST_CKPT_PATH = Path(os.environ.get("TG_ROBUST", BASE_DIR / "defences" / "checkpoints" / "best_robust.pt"))
 FRAMES_DIR      = Path(os.environ.get("TG_FRAMES", BASE_DIR / "data" / "sample_frames"))
 FRONTEND_DIST   = Path(os.environ.get("TG_FRONTEND", BASE_DIR / "frontend" / "dist"))

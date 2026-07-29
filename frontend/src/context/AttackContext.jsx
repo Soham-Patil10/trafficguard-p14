@@ -54,10 +54,18 @@ export function AttackProvider({ children }) {
   }, [])
 
   const toggleAttack = useCallback((name) => {
-    setAttacks(prev => ({
-      ...prev,
-      [name]: { ...prev[name], enabled: !prev[name].enabled },
-    }))
+    setAttacks(prev => {
+      const turningOn = !prev[name].enabled
+      const next = {}
+      for (const key of Object.keys(prev)) {
+        next[key] = {
+          ...prev[key],
+          // Only the toggled attack can end up enabled; every other attack is forced off.
+          enabled: key === name ? turningOn : false,
+        }
+      }
+      return next
+    })
   }, [])
 
   const setEpsilon = useCallback((attack, value) => {
@@ -69,13 +77,30 @@ export function AttackProvider({ children }) {
 
   const toggleDef = useCallback(
     async (name) => {
-      const newEnabled = !defences[name].enabled
-      setDefences(prev => ({
-        ...prev,
-        [name]: { ...prev[name], enabled: newEnabled },
-      }))
+      const turningOn = !defences[name].enabled
+
+      // Any other defence that was on needs to be switched off, both in
+      // local state and on the backend, so only one defence is ever active.
+      const othersToDisable = Object.keys(defences).filter(
+        (key) => key !== name && defences[key].enabled
+      )
+
+      setDefences(prev => {
+        const next = {}
+        for (const key of Object.keys(prev)) {
+          next[key] = {
+            ...prev[key],
+            enabled: key === name ? turningOn : false,
+          }
+        }
+        return next
+      })
+
       try {
-        await apiToggleDefence(name, newEnabled)
+        await apiToggleDefence(name, turningOn)
+        await Promise.all(
+          othersToDisable.map((key) => apiToggleDefence(key, false))
+        )
       } catch (e) {
         console.error('Defence toggle failed', e)
       }

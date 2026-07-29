@@ -128,10 +128,20 @@ export default function AttackLab() {
   const clearImage = () => { setCleanInput(null); setLastAttackResult(null); setError(null) }
 
   // Keep the sidebar in sync: toggling/sliding here updates shared context + the WS.
+  // Only one attack can be active at a time, so turning one on implicitly turns
+  // off whichever other attack was previously enabled — the WS needs both events.
   const handleToggle = (id) => {
     const willEnable = !attacks[id]?.enabled
+    const othersToDisable = willEnable
+      ? Object.keys(attacks).filter((key) => key !== id && attacks[key]?.enabled)
+      : []
+
     toggleAttack(id)
+
     wsClient.send({ type: 'attack_control', attack: id, enabled: willEnable, epsilon: attacks[id]?.epsilon })
+    othersToDisable.forEach((key) => {
+      wsClient.send({ type: 'attack_control', attack: key, enabled: false, epsilon: attacks[key]?.epsilon })
+    })
   }
   const handleEpsilon = (id, val) => {
     setEpsilon(id, val)

@@ -7,12 +7,28 @@ export default function AttackToggle({ attackName, label, dotColor }) {
   if (!attack) return null
 
   function handleChange() {
+    const willEnable = !attack.enabled
+    // Only one attack can be active at a time, so enabling this one implicitly
+    // disables whichever other attack was previously on — let the WS know too.
+    const othersToDisable = willEnable
+      ? Object.keys(attacks).filter((key) => key !== attackName && attacks[key]?.enabled)
+      : []
+
     toggleAttack(attackName)
+
     wsClient.send({
       type: 'attack_control',
       attack: attackName,
-      enabled: !attack.enabled,
+      enabled: willEnable,
       epsilon: attack.epsilon,
+    })
+    othersToDisable.forEach((key) => {
+      wsClient.send({
+        type: 'attack_control',
+        attack: key,
+        enabled: false,
+        epsilon: attacks[key]?.epsilon,
+      })
     })
   }
 

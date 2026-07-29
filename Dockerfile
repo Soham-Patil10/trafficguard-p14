@@ -28,10 +28,11 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 # Application code
 COPY backend/ ./backend/
 
-# Runtime assets. Copying the checkpoints dir (rather than named files) means the
-# build still succeeds if poisoned.pt is absent — the app degrades gracefully.
+# Runtime assets. Copying the checkpoints dirs (rather than named files) means the
+# build still succeeds if a checkpoint is absent — the app degrades gracefully.
 # .dockerignore keeps the large spare checkpoints out of the build context.
 COPY model/checkpoints/ ./model/checkpoints/
+COPY defences/checkpoints/ ./defences/checkpoints/
 COPY data/sample_frames/ ./data/sample_frames/
 
 # Built SPA from stage 1 (served by FastAPI at /)

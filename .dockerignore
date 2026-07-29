@@ -24,6 +24,7 @@ model/checkpoints/clean_baseline.pt
 model/checkpoints/poisoned_*.pt
 model/best.pt
 best.pt.zip
+best_robust.pt.zip
 
 # Training/experiment outputs
 attacks/adversarial_images

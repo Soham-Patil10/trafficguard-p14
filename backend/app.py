@@ -78,14 +78,15 @@ def _record(flip: int):
 
 def _live_metrics() -> dict:
     meta = ml.model_meta()
-    clean = meta["val_acc"] if meta["val_acc"] else 80.0
+    clean = meta["val_acc"] if meta["checkpoint_loaded"] else None
     if METRICS["frames"]:
         asr = round(100 * METRICS["flips"] / METRICS["frames"], 1)
     else:
         asr = 0.0
+    robust = round(max(0.0, clean - asr * (clean / 100.0)), 1) if clean is not None else None
     return {
-        "cleanAcc": round(clean, 1),
-        "robustAcc": round(max(0.0, clean - asr * (clean / 100.0)), 1),
+        "cleanAcc": round(clean, 1) if clean is not None else None,
+        "robustAcc": robust,
         "asr": asr,
         "certifiedRadius": 0.25,
     }

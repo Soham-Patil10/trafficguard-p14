@@ -2,11 +2,10 @@ import { useAttack } from '../../context/AttackContext'
 import { ShieldCheck, ShieldOff } from 'lucide-react'
 
 const DEFENCE_LABELS = {
-  advtrain: 'Adversarial Training',
-  jpeg: 'JPEG Compression',
-  smooth: 'Bit Smoothing',
-  rs: 'Randomized Smoothing',
-  ensemble: 'Ensemble Defense',
+  adv_train: 'Adversarial Training',
+  smooth: 'Spatial Smoothing',
+  rs: 'Randomised Smoothing',
+  diffusion: 'Diffusion Purification',
 }
 
 export default function DefenceStatus() {

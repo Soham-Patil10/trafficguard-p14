@@ -250,57 +250,65 @@ async def defence_apply(payload: dict = Body(...)):
     window       = int(payload.get("window", 3))
     loop         = asyncio.get_running_loop()
 
-    if defence_type == "diffusion" and DEFENCES.get("diffusion", False):
-        t_diffuse = int(payload.get("t_diffuse", 50))
-        d = await loop.run_in_executor(
-            None, lambda: ml.defend_diffusion(image, t_diffuse)
-        )
-        return {
-            "defended_pred":  d["defended_pred"],
-            "defended_conf":  d["defended_conf"],
-            "defended_image": d["defended_image"],
-            "defence_used":   "diffusion",
-        }
+    try:
+        if defence_type == "diffusion" and DEFENCES.get("diffusion", False):
+            t_diffuse = int(payload.get("t_diffuse", 50))
+            d = await loop.run_in_executor(
+                None, lambda: ml.defend_diffusion(image, t_diffuse)
+            )
+            return {
+                "defended_pred":  d["defended_pred"],
+                "defended_conf":  d["defended_conf"],
+                "defended_image": d["defended_image"],
+                "defence_used":   "diffusion",
+            }
 
-    elif defence_type == "rs" and DEFENCES.get("rs", False):
-        sigma = float(payload.get("sigma", 0.25))
-        n     = int(payload.get("n", 256))
-        d = await loop.run_in_executor(
-            None, lambda: ml.defend_randomised_smoothing(image, sigma=sigma, n=n)
-        )
-        return {
-            "defended_pred":    d["defended_pred"],
-            "defended_conf":    d["defended_conf"],
-            "defended_image":   d["defended_image"],
-            "certified_radius": d["certified_radius"],
-            "abstained":        d["abstained"],
-            "sigma":            d["sigma"],
-            "n_samples":        d["n_samples"],
-            "defence_used":     "rs",
-        }
+        elif defence_type == "rs" and DEFENCES.get("rs", False):
+            sigma = float(payload.get("sigma", 0.25))
+            n     = int(payload.get("n", 256))
+            d = await loop.run_in_executor(
+                None, lambda: ml.defend_randomised_smoothing(image, sigma=sigma, n=n)
+            )
+            return {
+                "defended_pred":    d["defended_pred"],
+                "defended_conf":    d["defended_conf"],
+                "defended_image":   d["defended_image"],
+                "certified_radius": d["certified_radius"],
+                "abstained":        d["abstained"],
+                "sigma":            d["sigma"],
+                "n_samples":        d["n_samples"],
+                "defence_used":     "rs",
+            }
 
-    elif defence_type == "adv_train" and DEFENCES.get("adv_train", False):
-        d = await loop.run_in_executor(None, lambda: ml.defend_adversarial_training(image))
-        return {
-            "defended_pred":  d["defended_pred"],
-            "defended_conf":  d["defended_conf"],
-            "defended_image": d["defended_image"],
-            "defence_used":   "adv_train",
-            "robust_loaded":  d["robust_loaded"],
-        }
+        elif defence_type == "adv_train" and DEFENCES.get("adv_train", False):
+            d = await loop.run_in_executor(None, lambda: ml.defend_adversarial_training(image))
+            return {
+                "defended_pred":  d["defended_pred"],
+                "defended_conf":  d["defended_conf"],
+                "defended_image": d["defended_image"],
+                "defence_used":   "adv_train",
+                "robust_loaded":  d["robust_loaded"],
+            }
 
-    else:
-        smooth = DEFENCES["smooth"]
-        d = await loop.run_in_executor(
-            None, lambda: ml.defend_pil(image, window, smooth)
-        )
-        return {
-            "defended_pred":  d["defended_pred"],
-            "defended_conf":  d["defended_conf"],
-            "defended_image": d["defended_image"],
-            "defence_used":   "smooth",
-            "window":         window,
-        }
+        else:
+            smooth = DEFENCES["smooth"]
+            d = await loop.run_in_executor(
+                None, lambda: ml.defend_pil(image, window, smooth)
+            )
+            return {
+                "defended_pred":  d["defended_pred"],
+                "defended_conf":  d["defended_conf"],
+                "defended_image": d["defended_image"],
+                "defence_used":   "smooth",
+                "window":         window,
+            }
+    except ModuleNotFoundError as e:
+        return JSONResponse(status_code=500, content={
+            "error": f"{defence_type} defence unavailable — missing dependency ({e.name}). "
+                     f"Run 'pip install -r requirements.txt' and restart the backend."
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"{defence_type} defence failed: {e}"})
 
 
 # Preset test images for the Attack Lab gallery (served from data/sample_frames).

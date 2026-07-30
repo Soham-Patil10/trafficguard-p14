@@ -47,7 +47,7 @@ export default function Defences() {
       setDefended(defenceResult)
       setLastDefenceResult(defenceResult)
     } catch (e) {
-      setError(e?.message || 'request failed')
+      setError(e?.response?.data?.error || e?.message || 'request failed')
     } finally {
       setRunning(false)
     }

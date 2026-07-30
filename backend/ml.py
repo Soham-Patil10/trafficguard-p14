@@ -39,8 +39,8 @@ SMOOTH_WINDOW = 3  # spatial-smoothing median window (matches ART SpatialSmoothi
 # ── Module-level cache ────────────────────────────────────────────────────────
 _model = None          # NormalizedResNet in eval() mode (clean model)
 _meta = {}             # checkpoint metadata
-_poisoned_model = None # NormalizedResNet in eval() mode (label-flipped model)
-_poisoned_meta = {}    # poisoned checkpoint metadata
+_poisoned_models: dict[str, "NormalizedResNet"] = {}  # label-flipped models, keyed by poison rate ("10"/"20"/"40")
+_poisoned_metas: dict[str, dict] = {}                 # per-rate checkpoint metadata
 _robust_model = None   # NormalizedResNet in eval() mode (adversarially-trained)
 _robust_meta = {}      # robust checkpoint metadata
 
@@ -182,19 +182,20 @@ def _load_state_flexible(model: NormalizedResNet, state: dict) -> None:
         model.backbone.load_state_dict(state)
 
 
-def load_poisoned_model(checkpoint_path: Path | str) -> bool:
-    """Load a second, label-flipped model into a separate slot.
+def load_poisoned_model(checkpoint_path: Path | str, rate: str) -> bool:
+    """Load a label-flipped model into the registry under the given poison rate
+    (e.g. "10", "20", "40"), so the Comparison page can pick between degrees of
+    poisoning rather than being pinned to a single checkpoint.
 
     Handles the label-flip notebook's whole-module save (a plain ResNet18 saved
     via torch.save(model)) by copying its weights into a NormalizedResNet backbone
     so it runs in the same [0,1] pixel space as the clean model. Returns True if
     real weights were loaded, False if the checkpoint is missing or unreadable.
     """
-    global _poisoned_model, _poisoned_meta
     checkpoint_path = Path(checkpoint_path)
     if not checkpoint_path.exists():
-        _poisoned_model = None
-        _poisoned_meta = {"epoch": "missing", "val_acc": 0.0, "loaded": False}
+        _poisoned_models.pop(rate, None)
+        _poisoned_metas[rate] = {"epoch": "missing", "val_acc": 0.0, "loaded": False}
         return False
 
     model = NormalizedResNet(num_classes=3).to(DEVICE)
@@ -212,23 +213,38 @@ def load_poisoned_model(checkpoint_path: Path | str) -> bool:
         else:  # a plain nn.Module (e.g. the notebook's torch.save(resnet18))
             model.backbone.load_state_dict(ckpt.state_dict())
     except Exception as e:
-        print(f"[TrafficGuard] ERROR: poisoned checkpoint could not be loaded: {e}")
-        _poisoned_model = None
-        _poisoned_meta = {"epoch": "?", "val_acc": 0.0, "loaded": False}
+        print(f"[TrafficGuard] ERROR: poisoned checkpoint ({rate}%) could not be loaded: {e}")
+        _poisoned_models.pop(rate, None)
+        _poisoned_metas[rate] = {"epoch": "?", "val_acc": 0.0, "loaded": False}
         return False
 
     model.eval()
-    _poisoned_model = model
-    _poisoned_meta = meta
+    _poisoned_models[rate] = model
+    _poisoned_metas[rate] = meta
     return True
 
 
-def poisoned_meta() -> dict:
+def poisoned_meta(rate: str | None = None) -> dict:
+    """Metadata for one rate, or a summary of every loaded rate when rate is None."""
+    if rate is not None:
+        m = _poisoned_metas.get(rate, {})
+        return {
+            "checkpoint_loaded": m.get("loaded", False),
+            "epoch": m.get("epoch"),
+            "val_acc": round(m.get("val_acc", 0.0) * 100, 2),
+        }
     return {
-        "checkpoint_loaded": _poisoned_meta.get("loaded", False),
-        "epoch": _poisoned_meta.get("epoch"),
-        "val_acc": round(_poisoned_meta.get("val_acc", 0.0) * 100, 2),
+        r: {
+            "checkpoint_loaded": m.get("loaded", False),
+            "epoch": m.get("epoch"),
+            "val_acc": round(m.get("val_acc", 0.0) * 100, 2),
+        }
+        for r, m in _poisoned_metas.items()
     }
+
+
+def available_poison_rates() -> list[str]:
+    return sorted(r for r, m in _poisoned_metas.items() if m.get("loaded"))
 
 def load_robust_model(checkpoint_path: Path | str) -> bool:
     """Load the adversarially-trained checkpoint (best_robust.pt) into its own slot.
@@ -296,18 +312,21 @@ def predict_pil(image: Image.Image) -> dict:
     return _predict_pixels(_pil_to_pixels(image))
 
 
-def compare_pil(image: Image.Image) -> dict:
-    """Predict the same image through the clean model and the poisoned model.
+def compare_pil(image: Image.Image, rate: str = "20") -> dict:
+    """Predict the same image through the clean model and the poisoned model at
+    the given poison rate ("10"/"20"/"40").
 
     Returns both predictions plus the (resized) input image. The 'poisoned' entry
-    is None when no poisoned checkpoint has been loaded.
+    is None when no checkpoint has been loaded for that rate.
     """
     x = _pil_to_pixels(image)
     clean = _predict_pixels(x)
-    poisoned = _predict_pixels(x, _poisoned_model) if _poisoned_model is not None else None
+    poisoned_model = _poisoned_models.get(rate)
+    poisoned = _predict_pixels(x, poisoned_model) if poisoned_model is not None else None
     return {
         "clean":     clean,
         "poisoned":  poisoned,
+        "rate":      rate,
         "image_b64": _pixels_to_b64(x),
     }
 

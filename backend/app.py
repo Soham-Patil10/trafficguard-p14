@@ -37,7 +37,12 @@ import ml   # all torch lives here
 # ── Paths (portable; relative to the repo) ────────────────────────────────────
 BASE_DIR        = Path(__file__).resolve().parent.parent
 CHECKPOINT_PATH = Path(os.environ.get("TG_CHECKPOINT", BASE_DIR / "model" / "checkpoints" / "best.pt"))
-POISONED_PATH   = Path(os.environ.get("TG_POISONED", BASE_DIR / "model" / "checkpoints" / "poisoned_10.pt"))
+# Label-flip checkpoints at three poison rates, so Model Compare can pick a degree.
+POISON_RATE_PATHS = {
+    "10": Path(os.environ.get("TG_POISONED_10", BASE_DIR / "model" / "checkpoints" / "poisoned_10pct.pt")),
+    "20": Path(os.environ.get("TG_POISONED_20", BASE_DIR / "model" / "checkpoints" / "poisoned_20pct.pt")),
+    "40": Path(os.environ.get("TG_POISONED_40", BASE_DIR / "model" / "checkpoints" / "poisoned_40pct.pt")),
+}
 ROBUST_CKPT_PATH = Path(os.environ.get("TG_ROBUST", BASE_DIR / "defences" / "checkpoints" / "best_robust.pt"))
 FRAMES_DIR      = Path(os.environ.get("TG_FRAMES", BASE_DIR / "data" / "sample_frames"))
 FRONTEND_DIST   = Path(os.environ.get("TG_FRONTEND", BASE_DIR / "frontend" / "dist"))
@@ -94,8 +99,9 @@ def _startup():
     global _FRAMES
     real = ml.load_model(CHECKPOINT_PATH)
     print(f"[TrafficGuard] checkpoint loaded: {real}  ({CHECKPOINT_PATH})")
-    poisoned = ml.load_poisoned_model(POISONED_PATH)
-    print(f"[TrafficGuard] poisoned model loaded: {poisoned}  ({POISONED_PATH})")
+    for rate, path in POISON_RATE_PATHS.items():
+        ok = ml.load_poisoned_model(path, rate)
+        print(f"[TrafficGuard] poisoned model ({rate}%) loaded: {ok}  ({path})")
     robust = ml.load_robust_model(ROBUST_CKPT_PATH)
     print(f"[TrafficGuard] robust model loaded: {robust}  ({ROBUST_CKPT_PATH})")
     print(f"[TrafficGuard] frames dir: {FRAMES_DIR}  exists={FRAMES_DIR.exists()}")
@@ -121,19 +127,21 @@ async def model_robust_info():
 # ── Model comparison (clean vs poisoned) ──────────────────────────────────────
 @app.get("/compare/status")
 async def compare_status():
-    """Whether a poisoned model is available for side-by-side comparison."""
-    return {"clean": ml.model_meta(), "poisoned": ml.poisoned_meta()}
+    """Which poison rates are available for side-by-side comparison."""
+    return {"clean": ml.model_meta(), "poisoned_rates": ml.poisoned_meta()}
 
 
 @app.post("/compare/models")
 async def compare_models(payload: dict = Body(...)):
-    """Run one uploaded image through both the clean and poisoned models."""
+    """Run one uploaded image through both the clean model and the poisoned
+    model at the requested rate ("10"/"20"/"40", default "20")."""
     try:
         image = _b64_to_pil(payload["image"])
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"bad image: {e}"})
+    rate = str(payload.get("rate", "20"))
     loop = asyncio.get_running_loop()
-    r = await loop.run_in_executor(None, lambda: ml.compare_pil(image))
+    r = await loop.run_in_executor(None, lambda: ml.compare_pil(image, rate))
     return {
         "clean_pred":     r["clean"]["label"],
         "clean_conf":     r["clean"]["confidence"],
@@ -141,6 +149,7 @@ async def compare_models(payload: dict = Body(...)):
         "poisoned_conf":  r["poisoned"]["confidence"] if r["poisoned"] else None,
         "disagree":       bool(r["poisoned"] and r["clean"]["idx"] != r["poisoned"]["idx"]),
         "poisoned_loaded": r["poisoned"] is not None,
+        "rate":           rate,
         "image":          r["image_b64"],
     }
 

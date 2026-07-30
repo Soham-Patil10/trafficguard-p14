@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { GitCompare, Play, Upload, ImageIcon, X, AlertTriangle } from 'lucide-react'
 import { compareModels, getCompareStatus, getSamples } from '../api/client'
+import { useAttack } from '../context/AttackContext'
 import ImagePanel from '../components/ImagePanel'
 
 const stripDataUrl = (d) => (d && d.includes(',') ? d.split(',')[1] : d)
@@ -56,8 +57,11 @@ function ModelCard({ title, pred, conf, tone }) {
 }
 
 export default function Comparison() {
-  const [cleanInput, setCleanInput] = useState(null) // { image, name }
-  const [rate, setRate] = useState('20')
+  // cleanInput and the poison rate are shared via context: the image already
+  // loaded in Attack Lab (or picked here) carries over automatically, and the
+  // rate persists across navigation (e.g. jumping here from the Label Flip toggle).
+  const { cleanInput, setCleanInput, attacks, setLabelFlipRate } = useAttack()
+  const rate = String(attacks.labelflip.rate)
   const [result, setResult] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState(null)
@@ -77,7 +81,7 @@ export default function Comparison() {
   const setImage = (image, name) => { setCleanInput({ image, name }); setResult(null); setError(null) }
   const pickSample = (s) => setImage(s.image, s.name)
   const clearImage = () => { setCleanInput(null); setResult(null); setError(null) }
-  const changeRate = (newRate) => { setRate(newRate); setResult(null); setError(null) }
+  const changeRate = (newRate) => { setLabelFlipRate(Number(newRate)); setResult(null); setError(null) }
 
   const runComparison = async () => {
     if (!cleanInput) return

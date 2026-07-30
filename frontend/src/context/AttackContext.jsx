@@ -75,6 +75,15 @@ export function AttackProvider({ children }) {
     }))
   }, [])
 
+  // Shared poison-rate selector: read by the Comparison page, settable from
+  // anywhere (e.g. Attack Lab) so the choice survives navigation.
+  const setLabelFlipRate = useCallback((rate) => {
+    setAttacks(prev => ({
+      ...prev,
+      labelflip: { ...prev.labelflip, rate },
+    }))
+  }, [])
+
   const toggleDef = useCallback(
     async (name) => {
       const turningOn = !defences[name].enabled
@@ -110,7 +119,7 @@ export function AttackProvider({ children }) {
 
   return (
     <AttackContext.Provider
-      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, toggleDef, lastAttackResult, setLastAttackResult, lastDefenceResult, setLastDefenceResult, cleanInput, setCleanInput }}
+      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, setLabelFlipRate, toggleDef, lastAttackResult, setLastAttackResult, lastDefenceResult, setLastDefenceResult, cleanInput, setCleanInput }}
     >
       {children}
     </AttackContext.Provider>

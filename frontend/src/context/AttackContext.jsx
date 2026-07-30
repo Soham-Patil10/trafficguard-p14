@@ -1,9 +1,11 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toggleDefence as apiToggleDefence, getMetrics } from '../api/client'
 
 const AttackContext = createContext(null)
 
 export function AttackProvider({ children }) {
+  const navigate = useNavigate()
   const [attacks, setAttacks] = useState({
     fgsm: { enabled: true, epsilon: 0.1 },
     pgd: { enabled: false, epsilon: 0.1, iterations: 40 },
@@ -54,8 +56,8 @@ export function AttackProvider({ children }) {
   }, [])
 
   const toggleAttack = useCallback((name) => {
+    const turningOn = !attacks[name].enabled
     setAttacks(prev => {
-      const turningOn = !prev[name].enabled
       const next = {}
       for (const key of Object.keys(prev)) {
         next[key] = {
@@ -66,7 +68,12 @@ export function AttackProvider({ children }) {
       }
       return next
     })
-  }, [])
+    // Label Flipping is training-time — it can't run per-image, so switching it
+    // on jumps straight to the Comparison page instead of leaving a dead toggle.
+    if (name === 'labelflip' && turningOn) {
+      navigate('/compare')
+    }
+  }, [attacks, navigate])
 
   const setEpsilon = useCallback((attack, value) => {
     setAttacks(prev => ({

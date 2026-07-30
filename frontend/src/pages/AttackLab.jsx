@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Zap, Play, Upload, ImageIcon, X, ArrowRight, Info } from 'lucide-react'
 import { runFGSM, runPGD, runDeepFool, getSamples } from '../api/client'
 import { useAttack } from '../context/AttackContext'
@@ -104,6 +105,7 @@ function ImageUploadZone({ onImageLoaded }) {
 }
 
 export default function AttackLab() {
+  const navigate = useNavigate()
   const {
     attacks, toggleAttack, setEpsilon,
     cleanInput, setCleanInput,
@@ -297,11 +299,20 @@ export default function AttackLab() {
       {poisoningOnly && (
         <div className="rounded-lg p-4 border border-amber-500/30 bg-amber-500/10 text-sm text-amber-300 flex items-start gap-2">
           <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-          <span>
-            Label Flipping is a <strong>training-time</strong> poisoning attack — it corrupts labels and retrains the
-            model, so it can't run on a single image here. Enable FGSM, PGD or DeepFool to attack this frame, and use
-            the <strong>Comparison</strong> tab to see the poisoned model's effect.
-          </span>
+          <div className="flex-1">
+            <span>
+              Label Flipping is a <strong>training-time</strong> poisoning attack — it corrupts labels and retrains
+              the model, so it can't run on a single image here. Turning it on jumps you to{' '}
+              <strong>Model Comparison</strong> automatically; enable FGSM, PGD or DeepFool instead to attack this
+              frame directly.
+            </span>
+            <button
+              onClick={() => navigate('/compare')}
+              className="mt-2 flex items-center gap-1.5 text-amber-200 hover:text-amber-100 font-medium"
+            >
+              <ArrowRight className="w-4 h-4" /> Go to Model Comparison
+            </button>
+          </div>
         </div>
       )}
 

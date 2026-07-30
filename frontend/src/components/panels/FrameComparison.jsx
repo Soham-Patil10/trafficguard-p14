@@ -201,16 +201,28 @@ export default function FrameComparison() {
         </div>
       </div>
 
-      {flipped && (
-        <div className="mt-3 flex items-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-[11px] font-mono text-red-400">
-          <AlertTriangle className="w-3.5 h-3.5" />
-          PREDICTION FLIPPED: {cleanPred.toUpperCase()} →{' '}
-          {attackPred.toUpperCase()}
-          {attackType === 'DeepFool' && iterations != null && (
-            <span className="text-slate-500 ml-1">({iterations} iters)</span>
-          )}
-        </div>
-      )}
+      {/* Fixed height, always mounted — only the content/colour changes on flip.
+          Conditionally mounting this box made the card's height (and every
+          panel below it) jump every ~1s as the live stream flipped in/out. */}
+      <div
+        className={`mt-3 h-9 flex items-center gap-2 px-3 rounded-lg text-[11px] font-mono transition-colors duration-200 ${
+          flipped
+            ? 'bg-red-500/10 border border-red-500/20 text-red-400'
+            : 'bg-slate-900/30 border border-slate-700/20 text-slate-600'
+        }`}
+      >
+        {flipped ? (
+          <>
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">
+              PREDICTION FLIPPED: {cleanPred.toUpperCase()} → {attackPred.toUpperCase()}
+              {attackType === 'DeepFool' && iterations != null && ` (${iterations} iters)`}
+            </span>
+          </>
+        ) : (
+          <span>Prediction stable</span>
+        )}
+      </div>
     </div>
   )
 }

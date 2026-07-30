@@ -51,6 +51,6 @@ export const getSamples = () => api.get('/samples')
 
 // Model comparison: clean vs poisoned (label-flipped) model on one image
 export const getCompareStatus = () => api.get('/compare/status')
-export const compareModels = (imageB64) =>
-  api.post('/compare/models', { image: imageB64 })
+export const compareModels = (imageB64, rate = '20') =>
+  api.post('/compare/models', { image: imageB64, rate })
  

@@ -4,6 +4,7 @@ import { compareModels, getCompareStatus, getSamples } from '../api/client'
 import ImagePanel from '../components/ImagePanel'
 
 const stripDataUrl = (d) => (d && d.includes(',') ? d.split(',')[1] : d)
+const POISON_RATES = ['10', '20', '40']
 
 function ImageUploadZone({ onImageLoaded }) {
   const [dragging, setDragging] = useState(false)
@@ -56,28 +57,33 @@ function ModelCard({ title, pred, conf, tone }) {
 
 export default function Comparison() {
   const [cleanInput, setCleanInput] = useState(null) // { image, name }
+  const [rate, setRate] = useState('20')
   const [result, setResult] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState(null)
   const [samples, setSamples] = useState([])
-  const [poisonedAvailable, setPoisonedAvailable] = useState(true)
+  // Per-rate availability, e.g. { "10": {checkpoint_loaded:true,...}, "20": {...}, "40": {...} }
+  const [rateStatus, setRateStatus] = useState({})
 
   useEffect(() => {
     getSamples().then((r) => setSamples(r.data?.samples || [])).catch(() => setSamples([]))
     getCompareStatus()
-      .then((r) => setPoisonedAvailable(!!r.data?.poisoned?.checkpoint_loaded))
-      .catch(() => setPoisonedAvailable(false))
+      .then((r) => setRateStatus(r.data?.poisoned_rates || {}))
+      .catch(() => setRateStatus({}))
   }, [])
+
+  const currentRateAvailable = !!rateStatus[rate]?.checkpoint_loaded
 
   const setImage = (image, name) => { setCleanInput({ image, name }); setResult(null); setError(null) }
   const pickSample = (s) => setImage(s.image, s.name)
   const clearImage = () => { setCleanInput(null); setResult(null); setError(null) }
+  const changeRate = (newRate) => { setRate(newRate); setResult(null); setError(null) }
 
   const runComparison = async () => {
     if (!cleanInput) return
     setRunning(true); setError(null)
     try {
-      const res = await compareModels(stripDataUrl(cleanInput.image))
+      const res = await compareModels(stripDataUrl(cleanInput.image), rate)
       const d = res.data
       setResult({
         cleanPred: d.clean_pred,
@@ -86,8 +92,8 @@ export default function Comparison() {
         poisonedConf: d.poisoned_conf,
         disagree: d.disagree,
         poisonedLoaded: d.poisoned_loaded,
+        rate: d.rate,
       })
-      setPoisonedAvailable(d.poisoned_loaded)
     } catch (e) {
       setError(e?.message || 'request failed')
     } finally {
@@ -101,20 +107,34 @@ export default function Comparison() {
         <div className="w-12 h-12 rounded-xl bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center">
           <GitCompare className="w-6 h-6 text-indigo-400" />
         </div>
-        <div>
+        <div className="flex-1">
           <h2 className="text-2xl font-bold">Model Comparison</h2>
           <p className="text-slate-400 text-sm">Run one image through the clean model and the label-flipped (poisoned) model, side by side</p>
         </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-slate-400">Poison rate</label>
+          <select
+            value={rate}
+            onChange={(e) => changeRate(e.target.value)}
+            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200"
+          >
+            {POISON_RATES.map((r) => (
+              <option key={r} value={r}>
+                {r}%{!rateStatus[r]?.checkpoint_loaded ? ' (unavailable)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      {!poisonedAvailable && (
+      {!currentRateAvailable && (
         <div className="rounded-lg p-4 border bg-amber-500/10 border-amber-500/30 text-sm text-amber-300 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold">No poisoned model loaded</p>
+            <p className="font-semibold">No {rate}% poisoned model loaded</p>
             <p className="text-slate-400 mt-1">
-              Place a label-flipped checkpoint at <span className="font-mono">model/checkpoints/poisoned.pt</span> (or set
-              the <span className="font-mono">TG_POISONED</span> env var) and restart the backend. The clean model still runs.
+              Place that label-flip checkpoint at <span className="font-mono">model/checkpoints/poisoned_{rate}pct.pt</span> (or
+              set the <span className="font-mono">TG_POISONED_{rate}</span> env var) and restart the backend. The clean model still runs.
             </p>
           </div>
         </div>
@@ -161,7 +181,7 @@ export default function Comparison() {
               <ImagePanel label="Input" src={cleanInput.image} badge="Clean input" badgeColor="bg-indigo-500/20 text-indigo-400"
                 sub={cleanInput.name} />
               <ModelCard title="Clean Model" pred={result?.cleanPred} conf={result?.cleanConf} tone="clean" />
-              <ModelCard title="Poisoned Model" pred={result?.poisonedPred} conf={result?.poisonedConf} tone="poison" />
+              <ModelCard title={`Poisoned Model (${rate}%)`} pred={result?.poisonedPred} conf={result?.poisonedConf} tone="poison" />
             </div>
 
             {error && (
@@ -188,14 +208,18 @@ export default function Comparison() {
       <div className="flex items-center gap-4 pt-2">
         <button
           onClick={runComparison}
-          disabled={!cleanInput || running}
+          disabled={!cleanInput || !currentRateAvailable || running}
           className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold px-6 py-3 rounded-lg transition-colors"
         >
           {running ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Play className="w-4 h-4 fill-white" />}
           {running ? 'Running...' : 'Run Comparison'}
         </button>
         <span className="text-slate-500 text-sm">
-          {!cleanInput ? 'Upload or pick a test image to compare the two models' : 'Runs the same image through both models on the backend'}
+          {!cleanInput
+            ? 'Upload or pick a test image to compare the two models'
+            : !currentRateAvailable
+            ? `${rate}% poisoned model isn't loaded — pick a different rate`
+            : `Runs the same image through the clean model and the ${rate}% poisoned model`}
         </span>
       </div>
     </div>

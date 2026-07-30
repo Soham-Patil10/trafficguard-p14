@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { toggleDefence as apiToggleDefence, getMetrics } from '../api/client'
+import { wsClient } from '../api/websocket'
 
 const AttackContext = createContext(null)
 
@@ -58,6 +59,27 @@ export function AttackProvider({ children }) {
       clearInterval(id)
     }
   }, [])
+
+  // The backend's live-stream attack flag is a single shared value, not tied
+  // to any one browser tab — a warm server instance can be left with a stale
+  // value from an earlier session. React's `attacks` default (fgsm: enabled)
+  // is purely local until a message is actually sent, so without this, the
+  // toggle can visually show ON while the backend is still off. Re-declaring
+  // our real state on every (re)connect keeps the two from silently diverging.
+  useEffect(() => {
+    const unsubscribe = wsClient.onOpen(() => {
+      const activeId = Object.keys(attacks).find((key) => attacks[key].enabled)
+      if (activeId) {
+        wsClient.send({
+          type: 'attack_control',
+          attack: activeId,
+          enabled: true,
+          epsilon: attacks[activeId].epsilon,
+        })
+      }
+    })
+    return unsubscribe
+  }, [attacks])
 
   const toggleAttack = useCallback((name) => {
     const turningOn = !attacks[name].enabled

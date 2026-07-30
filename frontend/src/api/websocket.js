@@ -11,10 +11,19 @@ function defaultWsUrl() {
 class TrafficGuardWS {
   ws = null
   handlers = new Set()
+  openHandlers = new Set()
   url = defaultWsUrl()
 
   connect() {
     this.ws = new WebSocket(this.url)
+
+    // Fires on every (re)connection — including the very first one and any
+    // auto-reconnect after a drop. Lets callers push their current state to
+    // the backend instead of assuming the backend's own default matches
+    // whatever the frontend happens to render.
+    this.ws.onopen = () => {
+      this.openHandlers.forEach(fn => fn())
+    }
 
     this.ws.onmessage = (event) => {
       const data = JSON.parse(event.data)
@@ -35,6 +44,12 @@ class TrafficGuardWS {
 
   unsubscribe(fn) {
     this.handlers.delete(fn)
+  }
+
+  // Returns an unsubscribe function, matching the on*/off* pattern elsewhere.
+  onOpen(fn) {
+    this.openHandlers.add(fn)
+    return () => this.openHandlers.delete(fn)
   }
 
   send(payload) {

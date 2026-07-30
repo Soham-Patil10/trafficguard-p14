@@ -1,0 +1,20 @@
+services:
+  trafficguard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Overrides the Dockerfile's PORT=7860 default so the container listens
+      # on 8000 — matching the port every local dev command in this project
+      # already assumes (curl http://localhost:8000, the frontend's dev
+      # default, etc).
+      - PORT=8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped

@@ -18,10 +18,12 @@ data/raw
 **/*.ipynb
 **/.ipynb_checkpoints
 
-# Spare/large model checkpoints — only best.pt + poisoned.pt are served
+# Spare/large model checkpoints — only best.pt, poisoned_{10,20,40}pct.pt and
+# best_robust.pt are served (see POISON_RATE_PATHS / ROBUST_CKPT_PATH in app.py).
+# poisoned.pt (no rate suffix) is a superseded single-rate file — dead weight.
 model/checkpoints/best_old_backup.pt
 model/checkpoints/clean_baseline.pt
-model/checkpoints/poisoned_*.pt
+model/checkpoints/poisoned.pt
 model/best.pt
 best.pt.zip
 best_robust.pt.zip

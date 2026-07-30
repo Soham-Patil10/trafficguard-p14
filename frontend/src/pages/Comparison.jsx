@@ -59,9 +59,9 @@ function ModelCard({ title, pred, conf, tone }) {
 export default function Comparison() {
   // cleanInput and the poison rate are shared via context: the image already
   // loaded in Attack Lab (or picked here) carries over automatically, and the
-  // rate persists across navigation (e.g. jumping here from the Label Flip toggle).
-  const { cleanInput, setCleanInput, attacks, setLabelFlipRate } = useAttack()
-  const rate = String(attacks.labelflip.rate)
+  // rate persists across navigation (e.g. jumping here from the Label Flip button).
+  const { cleanInput, setCleanInput, labelFlipRate, setLabelFlipRate } = useAttack()
+  const rate = String(labelFlipRate)
   const [result, setResult] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState(null)

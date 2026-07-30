@@ -1,17 +1,19 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { toggleDefence as apiToggleDefence, getMetrics } from '../api/client'
 
 const AttackContext = createContext(null)
 
 export function AttackProvider({ children }) {
-  const navigate = useNavigate()
   const [attacks, setAttacks] = useState({
     fgsm: { enabled: true, epsilon: 0.1 },
     pgd: { enabled: false, epsilon: 0.1, iterations: 40 },
     deepfool: { enabled: false, maxIter: 50 },
-    labelflip: { enabled: false, rate: 10 },
   })
+
+  // Label Flipping is training-time poisoning, not a per-image attack, so it's
+  // a button (jumps to Model Comparison) rather than a toggle — this rate is
+  // just the shared selector Comparison reads/writes, independent of `attacks`.
+  const [labelFlipRate, setLabelFlipRate] = useState(10)
 
   const [defences, setDefences] = useState({
   adv_train: { enabled: false },
@@ -68,26 +70,12 @@ export function AttackProvider({ children }) {
       }
       return next
     })
-    // Label Flipping is training-time — it can't run per-image, so switching it
-    // on jumps straight to the Comparison page instead of leaving a dead toggle.
-    if (name === 'labelflip' && turningOn) {
-      navigate('/compare')
-    }
-  }, [attacks, navigate])
+  }, [attacks])
 
   const setEpsilon = useCallback((attack, value) => {
     setAttacks(prev => ({
       ...prev,
       [attack]: { ...prev[attack], epsilon: value },
-    }))
-  }, [])
-
-  // Shared poison-rate selector: read by the Comparison page, settable from
-  // anywhere (e.g. Attack Lab) so the choice survives navigation.
-  const setLabelFlipRate = useCallback((rate) => {
-    setAttacks(prev => ({
-      ...prev,
-      labelflip: { ...prev.labelflip, rate },
     }))
   }, [])
 
@@ -126,7 +114,7 @@ export function AttackProvider({ children }) {
 
   return (
     <AttackContext.Provider
-      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, setLabelFlipRate, toggleDef, lastAttackResult, setLastAttackResult, lastDefenceResult, setLastDefenceResult, cleanInput, setCleanInput }}
+      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, labelFlipRate, setLabelFlipRate, toggleDef, lastAttackResult, setLastAttackResult, lastDefenceResult, setLastDefenceResult, cleanInput, setCleanInput }}
     >
       {children}
     </AttackContext.Provider>

@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   Zap,
@@ -6,6 +6,7 @@ import {
   GitCompare,
   Brain,
   FileText,
+  ArrowRight,
 } from 'lucide-react'
 import AttackToggle from '../controls/AttackToggle'
 import EpsilonSlider from '../controls/EpsilonSlider'
@@ -21,6 +22,8 @@ const NAV_ITEMS = [
 ]
 
 export default function Sidebar() {
+  const navigate = useNavigate()
+
   return (
     <aside className="fixed left-0 top-14 bottom-0 w-60 bg-slate-900/95 backdrop-blur-md border-r border-slate-700/50 flex flex-col z-40 overflow-y-auto">
       <nav className="flex-1 py-4">
@@ -52,8 +55,21 @@ export default function Sidebar() {
           <div className="mt-2 space-y-2">
             <AttackToggle attackName="fgsm" label="FGSM" dotColor="#f87171" />
             <AttackToggle attackName="pgd" label="PGD" dotColor="#fb923c" />
-            <AttackToggle attackName="labelflip" label="Label Flipping" dotColor="#facc15" />
             <AttackToggle attackName="deepfool" label="DeepFool" dotColor="#c084fc" />
+            {/* Training-time poisoning, not a per-image attack — a button to
+                Model Comparison rather than a toggle that can't do anything. */}
+            <button
+              onClick={() => navigate('/compare')}
+              className="flex items-center justify-between w-full group"
+            >
+              <span className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: '#facc15' }} />
+                <span className="text-[11px] text-slate-300 font-mono group-hover:text-slate-100">Label Flipping</span>
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-amber-400 group-hover:text-amber-300">
+                Compare <ArrowRight className="w-3 h-3" />
+              </span>
+            </button>
           </div>
         </div>
 

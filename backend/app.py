@@ -426,7 +426,11 @@ async def ws_stream(websocket: WebSocket):
                 msg = await websocket.receive_json()
                 if msg.get("type") == "epsilon_change":
                     STREAM_CTRL["epsilon"] = float(msg.get("epsilon", STREAM_CTRL["epsilon"]))
-                elif msg.get("type") == "attack_control" and msg.get("attack") == "fgsm":
+                elif msg.get("type") == "attack_control" and msg.get("attack") in ("fgsm", "pgd", "deepfool"):
+                    # Any evasion attack toggling on/off controls the live stream — the
+                    # frontend only allows one to be enabled at a time, and switching
+                    # between them sends a disable for whichever was previously active,
+                    # so this must react to all three, not just fgsm.
                     STREAM_CTRL["attack_enabled"] = bool(msg.get("enabled", True))
                     if msg.get("epsilon") is not None:
                         STREAM_CTRL["epsilon"] = float(msg["epsilon"])

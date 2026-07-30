@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Zap, Play, Upload, ImageIcon, X, ArrowRight, Info } from 'lucide-react'
+import { Zap, Play, Upload, ImageIcon, X, ArrowRight } from 'lucide-react'
 import { runFGSM, runPGD, runDeepFool, getSamples } from '../api/client'
 import { useAttack } from '../context/AttackContext'
 import { wsClient } from '../api/websocket'
@@ -16,10 +16,15 @@ const ATTACK_META = [
   // reports the resulting L2 as a robustness score.
   { id: 'deepfool', name: 'DeepFool', hasEpsilon: false, extra: 'Minimal perturbation · reports L2', kind: 'evasion',
     description: 'DeepFool — iteratively steps to the nearest decision boundary to find the smallest perturbation that flips the prediction. Reports the minimal L2 change instead of taking an epsilon budget.' },
-  // Poisoning is a TRAINING-time attack: it cannot run on a single image here.
-  { id: 'labelflip', name: 'Label Flipping', hasEpsilon: false, extra: 'Training-time · see Comparison tab', kind: 'poisoning',
-    description: 'Label Flipping Poisoning — corrupts a fraction of training labels to degrade model reliability from within. Runs offline during training, not per-image.' },
 ]
+
+// Poisoning is a TRAINING-time attack — it cannot run on a single image here,
+// so it's rendered as its own card with a button (see PoisonCard) instead of
+// a toggle in ATTACK_META.
+const POISON_META = {
+  name: 'Label Flipping',
+  description: 'Label Flipping Poisoning — corrupts a fraction of training labels to degrade model reliability from within. Runs offline during training, not per-image.',
+}
 
 // Evasion attacks in priority order (first enabled one wins)
 const EVASION_PRIORITY = ['pgd', 'deepfool', 'fgsm']
@@ -71,6 +76,28 @@ function AttackCard({ meta, attack, onToggle, onEpsilon }) {
         </div>
       )}
       {meta.extra && <p className="text-slate-500 text-sm">{meta.extra}</p>}
+    </div>
+  )
+}
+
+function PoisonCard({ meta, onCompare }) {
+  return (
+    <div className="rounded-xl border p-6 flex flex-col gap-4 bg-[#12151f] border-slate-700">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="font-bold tracking-wide text-white">{meta.name}</span>
+          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+            poisoning
+          </span>
+        </div>
+      </div>
+      <p className="text-slate-400 text-sm leading-relaxed flex-1">{meta.description}</p>
+      <button
+        onClick={onCompare}
+        className="flex items-center justify-center gap-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-semibold px-4 py-2 rounded-lg transition-colors"
+      >
+        <ArrowRight className="w-4 h-4" /> Compare Poisoned Model
+      </button>
     </div>
   )
 }
@@ -150,9 +177,8 @@ export default function AttackLab() {
     wsClient.send({ type: 'epsilon_change', attack: id, epsilon: val })
   }
 
-  // Which evasion attack will actually run (poisoning is excluded — it's training-time)
+  // Which evasion attack will actually run (poisoning isn't toggle-based — it's training-time)
   const selectedAttackId = EVASION_PRIORITY.find((id) => attacks[id]?.enabled) || null
-  const poisoningOnly = !selectedAttackId && !!attacks.labelflip?.enabled
 
   const runAttack = async () => {
     if (!cleanInput || !selectedAttackId) return
@@ -296,30 +322,11 @@ export default function AttackLab() {
         )}
       </div>
 
-      {poisoningOnly && (
-        <div className="rounded-lg p-4 border border-amber-500/30 bg-amber-500/10 text-sm text-amber-300 flex items-start gap-2">
-          <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-          <div className="flex-1">
-            <span>
-              Label Flipping is a <strong>training-time</strong> poisoning attack — it corrupts labels and retrains
-              the model, so it can't run on a single image here. Turning it on jumps you to{' '}
-              <strong>Model Comparison</strong> automatically; enable FGSM, PGD or DeepFool instead to attack this
-              frame directly.
-            </span>
-            <button
-              onClick={() => navigate('/compare')}
-              className="mt-2 flex items-center gap-1.5 text-amber-200 hover:text-amber-100 font-medium"
-            >
-              <ArrowRight className="w-4 h-4" /> Go to Model Comparison
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {ATTACK_META.map((meta) => (
           <AttackCard key={meta.id} meta={meta} attack={attacks[meta.id]} onToggle={handleToggle} onEpsilon={handleEpsilon} />
         ))}
+        <PoisonCard meta={POISON_META} onCompare={() => navigate('/compare')} />
       </div>
 
       <div className="flex items-center gap-4 pt-2">

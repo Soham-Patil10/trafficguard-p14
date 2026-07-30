@@ -222,14 +222,13 @@ async def defence_toggle(payload: dict = Body(...)):
 
 @app.get("/defence/epsilon-sweep")
 async def epsilon_sweep(attack: str = "fgsm"):
-    # Robust-accuracy-vs-epsilon curve in the exact shape EpsilonChart expects.
-    rows = [
-        {"epsilon": 0.01, "baseline": 96.2, "jpeg": 93.1},
-        {"epsilon": 0.05, "baseline": 82.1, "jpeg": 80.2},
-        {"epsilon": 0.10, "baseline": 61.2, "jpeg": 67.5},
-        {"epsilon": 0.20, "baseline": 38.4, "jpeg": 48.3},
-        {"epsilon": 0.30, "baseline": 22.1, "jpeg": 34.7},
-    ]
+    # Real FGSM robust-accuracy-vs-epsilon curve, computed against the sample
+    # frames (baseline model, and the adversarially-trained model when loaded).
+    # Lazy + cached in ml.py, so only the first call pays the compute cost.
+    # NB: only FGSM is computed live right now — a PGD-specific sweep (slower,
+    # iterative) is a natural follow-up, not yet wired to the `attack` param.
+    loop = asyncio.get_running_loop()
+    rows = await loop.run_in_executor(None, lambda: ml.epsilon_sweep_data(_FRAMES))
     return rows
 
 

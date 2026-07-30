@@ -415,6 +415,83 @@ def run_pgd(image: Image.Image, epsilon: float = 0.1, steps: int = 40, alpha: fl
     }
 
 
+# ── Epsilon sweep (real accuracy-vs-epsilon curve for the Dashboard chart) ───
+_EPSILON_SWEEP_CACHE: dict[str, list[dict]] = {}
+
+
+def _fgsm_perturb_with_model(x: torch.Tensor, epsilon: float, model: "NormalizedResNet") -> torch.Tensor:
+    """Same textbook FGSM as _fgsm_perturb, but against an arbitrary model's own
+    gradients (white-box). Kept separate from _fgsm_perturb so the existing
+    single-image attack path is untouched — this is only used by the sweep,
+    which needs to attack the robust model with ITS OWN gradients, not a
+    transferred perturbation from the clean model (transfer attacks understate
+    a defended model's true vulnerability)."""
+    x = x.clone().detach().requires_grad_(True)
+    logits = model(x)
+    target = logits.argmax(dim=1).detach()
+    loss = F.cross_entropy(logits, target)
+    model.zero_grad(set_to_none=True)
+    loss.backward()
+    return (x + epsilon * x.grad.sign()).clamp(0, 1).detach()
+
+
+def epsilon_sweep_data(image_paths: list, epsilons: list[float] | None = None) -> list[dict]:
+    """Real FGSM epsilon sweep: robust-accuracy-vs-epsilon for the baseline
+    (clean) model and, when loaded, the adversarially-trained model.
+
+    No ground-truth labels exist for the sample frames at request time, so
+    "robust accuracy" here is this model's own known validation accuracy times
+    its retention rate — the fraction of sample images whose FGSM-attacked
+    prediction still matches its clean prediction. This is the same
+    clean-accuracy * retention principle _live_metrics() already uses
+    elsewhere in app.py, just computed properly per epsilon instead of from a
+    running estimate.
+
+    Lazy + cached: the first call computes it (a few seconds on CPU for 8
+    images x 5 epsilons x up to 2 models); every call after returns the cache.
+    """
+    if "fgsm" in _EPSILON_SWEEP_CACHE:
+        return _EPSILON_SWEEP_CACHE["fgsm"]
+
+    if epsilons is None:
+        epsilons = [0.01, 0.05, 0.10, 0.20, 0.30]
+
+    images = []
+    for p in image_paths:
+        try:
+            images.append(Image.open(p).convert("RGB"))
+        except Exception:
+            continue
+    if not images:
+        return []
+
+    model_specs = [("baseline", get_model(), _meta.get("val_acc", 0.0))]
+    if _robust_model is not None:
+        model_specs.append(("adv_train", _robust_model, _robust_meta.get("val_acc", 0.0)))
+
+    # Clean predictions are epsilon-independent — compute once per model.
+    clean_idxs = {
+        name: [_predict_pixels(_pil_to_pixels(img), model)["idx"] for img in images]
+        for name, model, _ in model_specs
+    }
+
+    rows = []
+    for eps in epsilons:
+        row = {"epsilon": eps}
+        for name, model, val_acc in model_specs:
+            retained = 0
+            for img, clean_idx in zip(images, clean_idxs[name]):
+                x_adv = _fgsm_perturb_with_model(_pil_to_pixels(img), eps, model)
+                if _predict_pixels(x_adv, model)["idx"] == clean_idx:
+                    retained += 1
+            retention = retained / len(images)
+            row[name] = round(val_acc * 100 * retention, 1)
+        rows.append(row)
+
+    _EPSILON_SWEEP_CACHE["fgsm"] = rows
+    return rows
+
+
 # ── DeepFool attack (Moosavi-Dezfooli et al., 2016) ─────────────────────────
 def run_deepfool(image: Image.Image, max_iter: int = 50, overshoot: float = 0.02) -> dict:
     """DeepFool: minimal-perturbation evasion attack.

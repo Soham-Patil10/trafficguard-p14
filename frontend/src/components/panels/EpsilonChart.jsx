@@ -10,47 +10,43 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { getEpsilonSweep } from '../../api/client'
-import { useAttack } from '../../context/AttackContext'
 
+// Fallback shown only until the real (computed) sweep arrives from the backend.
 const PLACEHOLDER_DATA = [
-  { epsilon: 0.01, baseline: 96.2, advtrain: 91.4, jpeg: 93.1 },
-  { epsilon: 0.05, baseline: 82.1, advtrain: 79.8, jpeg: 80.2 },
-  { epsilon: 0.1, baseline: 61.2, advtrain: 72.3, jpeg: 67.5 },
-  { epsilon: 0.2, baseline: 38.4, advtrain: 55.1, jpeg: 48.3 },
-  { epsilon: 0.3, baseline: 22.1, advtrain: 40.2, jpeg: 34.7 },
+  { epsilon: 0.01, baseline: 96.2, adv_train: 91.4 },
+  { epsilon: 0.05, baseline: 82.1, adv_train: 79.8 },
+  { epsilon: 0.1, baseline: 61.2, adv_train: 72.3 },
+  { epsilon: 0.2, baseline: 38.4, adv_train: 55.1 },
+  { epsilon: 0.3, baseline: 22.1, adv_train: 40.2 },
 ]
 
 export default function EpsilonChart() {
-  const { attacks } = useAttack()
   const [sweepData, setSweepData] = useState(PLACEHOLDER_DATA)
   const [loading, setLoading] = useState(false)
 
-  const activeAttack = attacks.fgsm.enabled
-    ? 'fgsm'
-    : attacks.pgd.enabled
-      ? 'pgd'
-      : 'fgsm'
-
+  // Only FGSM is computed live right now (fast, single-step) — a PGD sweep
+  // is slower/iterative and not yet wired up, so the title doesn't follow
+  // the attack toggle (that would mislabel FGSM-derived numbers as PGD).
   useEffect(() => {
     setLoading(true)
-    getEpsilonSweep(activeAttack)
+    getEpsilonSweep('fgsm')
       .then(res => {
         const data = res.data
-        if (Array.isArray(data)) {
+        if (Array.isArray(data) && data.length > 0) {
           setSweepData(data)
         } else {
-          console.warn('Epsilon sweep returned non-array data, using placeholder:', data)
+          console.warn('Epsilon sweep returned no data, using placeholder:', data)
           setSweepData(PLACEHOLDER_DATA)
         }
       })
       .finally(() => setLoading(false))
-  }, [activeAttack])
+  }, [])
 
 return (
   <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl p-4 hover:border-slate-600/60 transition-all duration-300">
     <div className="flex items-center justify-between mb-3">
       <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
-        Robust Accuracy vs e — {activeAttack.toUpperCase()}
+        Robust Accuracy vs e — FGSM
       </span>
     </div>
     <div className="h-44">
@@ -97,20 +93,11 @@ return (
             />
             <Line
               type="monotone"
-              dataKey="advtrain"
+              dataKey="adv_train"
               stroke="#34d399"
               strokeWidth={2}
               dot={{ r: 3 }}
               name="Adv. Training"
-            />
-            <Line
-              type="monotone"
-              dataKey="jpeg"
-              stroke="#38bdf8"
-              strokeWidth={2}
-              dot={{ r: 3 }}
-              strokeDasharray="6 3"
-              name="JPEG+Smooth"
             />
           </LineChart>
         </ResponsiveContainer>

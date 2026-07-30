@@ -9,7 +9,6 @@ import { FileText, Download, Loader2, AlertTriangle } from 'lucide-react'
 const ATTACK_NAMES = {
   fgsm:      'FGSM',
   pgd:       'PGD',
-  labelflip: 'Label Flipping',
   deepfool:  'DeepFool',
 }
 const DEFENCE_NAMES = {
@@ -39,7 +38,7 @@ const toPercent = (v) => {
 }
 
 export default function ReportPage() {
-  const { metrics, attacks, defences, lastAttackResult, lastDefenceResult } = useAttack()
+  const { metrics, attacks, defences, lastAttackResult, lastDefenceResult, lastCompareResult } = useAttack()
   const { latestFrame } = useStream()
   const [generating, setGenerating] = useState(false)
   const [error, setError]           = useState(null)
@@ -107,9 +106,25 @@ export default function ReportPage() {
             }
           : null
 
+        // Model Comparison (clean vs poisoned/label-flipped) is independent of the
+        // attack/defence flow above — it's optional, included only if it was run.
+        const compare = lastCompareResult
+          ? {
+              image:          lastCompareResult.image,
+              rate:           lastCompareResult.rate,
+              cleanPred:      lastCompareResult.cleanPred,
+              cleanConf:      Number(lastCompareResult.cleanConf),
+              poisonedPred:   lastCompareResult.poisonedPred,
+              poisonedConf:   Number(lastCompareResult.poisonedConf),
+              disagree:       lastCompareResult.disagree,
+              poisonedLoaded: lastCompareResult.poisonedLoaded,
+            }
+          : null
+
         buildPdf({
           capture,
           defence,
+          compare,
           metrics,
           enabledAttacks,
           enabledDefences,
@@ -145,10 +160,11 @@ export default function ReportPage() {
         <ul className="text-sm text-slate-400 space-y-1.5 list-disc list-inside">
           <li>Live ASR meter (current attack success rate)</li>
           <li>Frame comparison — clean vs attacked vs defended</li>
-          <li>Attack performed (FGSM / PGD / Label Flipping / DeepFool) and epsilon value</li>
-          <li>Defence performed (Spatial Smoothing / Diffusion Purification / Randomised Smoothing / JPEG)</li>
+          <li>Attack performed (FGSM / PGD / DeepFool) and epsilon value</li>
+          <li>Defence performed (Spatial Smoothing / Diffusion Purification / Randomised Smoothing / Adversarial Training)</li>
           <li>Attack success verdict (did the prediction flip?)</li>
           <li>Defence success verdict (did the defence recover the correct label?)</li>
+          <li>Model Comparison — clean vs poisoned (label-flipped) model verdict, if run</li>
           <li>Session metrics — clean accuracy, robust accuracy, ASR, certified radius</li>
           <li>Active attacks and defences at time of generation</li>
         </ul>
@@ -223,6 +239,14 @@ export default function ReportPage() {
                   {lastDefenceResult ? (lastDefenceResult.recovered ? `RECOVERED → ${lastDefenceResult.pred}` : `NOT RECOVERED · ${lastDefenceResult.pred}`) : 'run defence first'}
                 </span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Model comparison</span>
+                <span className={`font-mono font-bold ${lastCompareResult ? (lastCompareResult.disagree ? 'text-red-400' : 'text-emerald-400') : 'text-slate-500'}`}>
+                  {lastCompareResult
+                    ? `${lastCompareResult.cleanPred} vs ${lastCompareResult.poisonedPred} @ ${lastCompareResult.rate}%${lastCompareResult.disagree ? ' · DISAGREE' : ''}`
+                    : 'not run — visit Model Compare'}
+                </span>
+              </div>
               <div className="text-xs text-slate-500">
                 Active attacks: {enabledAttacks.length ? enabledAttacks.join(', ') : 'none'}
               </div>
@@ -256,7 +280,7 @@ export default function ReportPage() {
 }
 
 // ── PDF builder ───────────────────────────────────────────────────────────────
-function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, attackSucceeded, attacks, defences }) {
+function buildPdf({ capture, defence, compare, metrics, enabledAttacks, enabledDefences, attackSucceeded, attacks, defences }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const W  = doc.internal.pageSize.getWidth()
   const H  = doc.internal.pageSize.getHeight()
@@ -396,7 +420,6 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
     FGSM:      'Fast Gradient Sign Method (FGSM) is a single-step evasion attack that perturbs each pixel by a fixed epsilon in the direction of the loss gradient. It is computationally cheap and effective, making it a standard baseline for robustness evaluation. The attack is untargeted — it pushes the prediction away from the correct class without specifying a target class.',
     PGD:       'Projected Gradient Descent (PGD) is an iterative evasion attack that takes multiple small gradient steps, projecting back into the epsilon-ball after each step. It is strictly stronger than FGSM at the same epsilon and is considered the gold standard for adversarial robustness evaluation (Madry et al., 2018).',
     DeepFool:  'DeepFool (Moosavi-Dezfooli et al., 2016) finds the minimal L2 perturbation needed to cross the nearest decision boundary. Unlike FGSM/PGD which use a fixed epsilon budget, DeepFool adapts the perturbation magnitude per image. The returned L2 norm is a per-image robustness score — smaller values indicate the model is easier to fool.',
-    'Label Flipping': 'Label Flipping is a data poisoning attack applied at training time. A fraction of training labels are flipped to incorrect classes, degrading model reliability from within. Unlike evasion attacks, this cannot be applied to a deployed model — it requires access to the training pipeline.',
   }
   const attackDesc = attackDescriptions[capture.attackType] ?? `${capture.attackType} attack applied at epsilon = ${capture.epsilon}.`
   printBody(attackDesc, M + 14, y + 32, CW - 28, 12)
@@ -435,6 +458,62 @@ function buildPdf({ capture, defence, metrics, enabledAttacks, enabledDefences, 
     doc.text(defSummary, M + 14, y + 98)
   }
   y += 110 + 22
+
+  // ── Section 3b: Model Comparison (clean vs poisoned) — optional ──────────
+  if (compare) {
+    y = checkPage(y, 180)
+    sectionLabel(doc, 'MODEL COMPARISON — LABEL FLIPPING POISONING', M, y); y += 16
+    const cRowTop = y
+    const cColW   = (CW - 20) / 2
+
+    // Left card: input image + both models' predictions
+    card(doc, M, cRowTop, cColW, 160)
+    setText('#334155')
+    doc.setFont('helvetica', 'bold').setFontSize(9)
+    doc.text(`Poison rate: ${compare.rate}%`, M + 12, cRowTop + 20)
+    try {
+      doc.addImage(toDataUrl(compare.image), imgFormat(toDataUrl(compare.image)), M + 12, cRowTop + 30, 70, 70)
+    } catch {
+      setFill('#f1f5f9')
+      doc.rect(M + 12, cRowTop + 30, 70, 70, 'F')
+    }
+    setText(PRED_HEX[compare.cleanPred] ?? '#64748b')
+    doc.setFont('helvetica', 'bold').setFontSize(9)
+    doc.text(`Clean model: ${compare.cleanPred}`, M + 92, cRowTop + 48)
+    setText('#64748b')
+    doc.setFont('helvetica', 'normal').setFontSize(8)
+    doc.text(`conf ${compare.cleanConf.toFixed(1)}%`, M + 92, cRowTop + 60)
+
+    setText(compare.poisonedLoaded ? (PRED_HEX[compare.poisonedPred] ?? '#64748b') : '#94a3b8')
+    doc.setFont('helvetica', 'bold').setFontSize(9)
+    doc.text(`Poisoned model: ${compare.poisonedLoaded ? compare.poisonedPred : 'N/A'}`, M + 92, cRowTop + 84)
+    setText('#64748b')
+    doc.setFont('helvetica', 'normal').setFontSize(8)
+    doc.text(compare.poisonedLoaded ? `conf ${compare.poisonedConf.toFixed(1)}%` : 'checkpoint not loaded', M + 92, cRowTop + 96)
+
+    // Right card: verdict badge + short explanation
+    const crx = M + cColW + 20
+    card(doc, crx, cRowTop, cColW, 160)
+    setText('#334155')
+    doc.setFont('helvetica', 'bold').setFontSize(9)
+    doc.text('Verdict', crx + 12, cRowTop + 20)
+    badge(
+      doc, crx + 12, cRowTop + 36, cColW - 24,
+      !compare.poisonedLoaded ? '#64748b' : compare.disagree ? '#ef4444' : '#22c55e',
+      !compare.poisonedLoaded ? 'POISONED MODEL UNAVAILABLE' : compare.disagree ? 'POISONING CHANGED PREDICTION' : 'MODELS AGREE',
+      !compare.poisonedLoaded
+        ? 'load the poisoned checkpoint to compare'
+        : compare.disagree
+        ? `${compare.cleanPred} -> ${compare.poisonedPred}`
+        : `both predicted ${compare.cleanPred}`
+    )
+    printBody(
+      'Label Flipping corrupts a fraction of training labels, causing this poisoned model to learn a systematically wrong mapping. Both models were evaluated on the same input image.',
+      crx + 12, cRowTop + 96, cColW - 24, 11
+    )
+
+    y = cRowTop + 160 + 22
+  }
 
   // ── Section 4: Frame comparison ───────────────────────────────────────────
   y = checkPage(y, 180)

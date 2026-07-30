@@ -60,9 +60,13 @@ export default function Comparison() {
   // cleanInput and the poison rate are shared via context: the image already
   // loaded in Attack Lab (or picked here) carries over automatically, and the
   // rate persists across navigation (e.g. jumping here from the Label Flip button).
-  const { cleanInput, setCleanInput, labelFlipRate, setLabelFlipRate } = useAttack()
+  // lastCompareResult is likewise shared (not local state) so the Report page
+  // can pick up whatever comparison was last run here.
+  const {
+    cleanInput, setCleanInput, labelFlipRate, setLabelFlipRate,
+    lastCompareResult, setLastCompareResult,
+  } = useAttack()
   const rate = String(labelFlipRate)
-  const [result, setResult] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState(null)
   const [samples, setSamples] = useState([])
@@ -78,10 +82,10 @@ export default function Comparison() {
 
   const currentRateAvailable = !!rateStatus[rate]?.checkpoint_loaded
 
-  const setImage = (image, name) => { setCleanInput({ image, name }); setResult(null); setError(null) }
+  const setImage = (image, name) => { setCleanInput({ image, name }); setLastCompareResult(null); setError(null) }
   const pickSample = (s) => setImage(s.image, s.name)
-  const clearImage = () => { setCleanInput(null); setResult(null); setError(null) }
-  const changeRate = (newRate) => { setLabelFlipRate(Number(newRate)); setResult(null); setError(null) }
+  const clearImage = () => { setCleanInput(null); setLastCompareResult(null); setError(null) }
+  const changeRate = (newRate) => { setLabelFlipRate(Number(newRate)); setLastCompareResult(null); setError(null) }
 
   const runComparison = async () => {
     if (!cleanInput) return
@@ -89,7 +93,9 @@ export default function Comparison() {
     try {
       const res = await compareModels(stripDataUrl(cleanInput.image), rate)
       const d = res.data
-      setResult({
+      setLastCompareResult({
+        image: cleanInput.image,
+        fileName: cleanInput.name,
         cleanPred: d.clean_pred,
         cleanConf: d.clean_conf,
         poisonedPred: d.poisoned_pred,
@@ -184,8 +190,8 @@ export default function Comparison() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <ImagePanel label="Input" src={cleanInput.image} badge="Clean input" badgeColor="bg-indigo-500/20 text-indigo-400"
                 sub={cleanInput.name} />
-              <ModelCard title="Clean Model" pred={result?.cleanPred} conf={result?.cleanConf} tone="clean" />
-              <ModelCard title={`Poisoned Model (${rate}%)`} pred={result?.poisonedPred} conf={result?.poisonedConf} tone="poison" />
+              <ModelCard title="Clean Model" pred={lastCompareResult?.cleanPred} conf={lastCompareResult?.cleanConf} tone="clean" />
+              <ModelCard title={`Poisoned Model (${rate}%)`} pred={lastCompareResult?.poisonedPred} conf={lastCompareResult?.poisonedConf} tone="poison" />
             </div>
 
             {error && (
@@ -194,14 +200,14 @@ export default function Comparison() {
               </div>
             )}
 
-            {result && !error && result.poisonedLoaded && (
-              <div className={`rounded-lg p-4 border text-sm ${result.disagree ? 'bg-red-500/10 border-red-500/30 text-red-300' : 'bg-slate-700/30 border-slate-600 text-slate-300'}`}>
+            {lastCompareResult && !error && lastCompareResult.poisonedLoaded && (
+              <div className={`rounded-lg p-4 border text-sm ${lastCompareResult.disagree ? 'bg-red-500/10 border-red-500/30 text-red-300' : 'bg-slate-700/30 border-slate-600 text-slate-300'}`}>
                 <p className="font-semibold">
-                  {result.disagree ? 'Poisoning changed the prediction' : 'Both models agree'}
+                  {lastCompareResult.disagree ? 'Poisoning changed the prediction' : 'Both models agree'}
                 </p>
                 <p className="text-slate-400 mt-1">
-                  clean: <span className="text-blue-300">{result.cleanPred}</span>
-                  &nbsp;·&nbsp; poisoned: <span className="text-red-300">{result.poisonedPred}</span>
+                  clean: <span className="text-blue-300">{lastCompareResult.cleanPred}</span>
+                  &nbsp;·&nbsp; poisoned: <span className="text-red-300">{lastCompareResult.poisonedPred}</span>
                 </p>
               </div>
             )}

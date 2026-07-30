@@ -32,6 +32,8 @@ export function AttackProvider({ children }) {
   // Shared hand-off: the most recent attack result, consumed by the Defence Lab
   const [lastAttackResult, setLastAttackResult] = useState(null)
   const [lastDefenceResult, setLastDefenceResult] = useState(null)
+  // Most recent Model Comparison (clean vs poisoned) result, consumed by the Report
+  const [lastCompareResult, setLastCompareResult] = useState(null)
 
   // Persistent Attack Lab input: the uploaded/selected clean image. Lives in
   // context so it survives page switches and only clears when the user clears it.
@@ -114,7 +116,7 @@ export function AttackProvider({ children }) {
 
   return (
     <AttackContext.Provider
-      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, labelFlipRate, setLabelFlipRate, toggleDef, lastAttackResult, setLastAttackResult, lastDefenceResult, setLastDefenceResult, cleanInput, setCleanInput }}
+      value={{ attacks, defences, metrics, setMetrics, toggleAttack, setEpsilon, labelFlipRate, setLabelFlipRate, toggleDef, lastAttackResult, setLastAttackResult, lastDefenceResult, setLastDefenceResult, lastCompareResult, setLastCompareResult, cleanInput, setCleanInput }}
     >
       {children}
     </AttackContext.Provider>

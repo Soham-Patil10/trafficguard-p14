@@ -43,5 +43,3 @@ adversarial training recovered it to Z%."**
 Python, PyTorch, torchvision, scikit-learn, Jupyter. Backend in `backend/`,
 frontend in `frontend/`. Containerised with Docker / docker-compose;
 GCP deployment documented in `DEPLOY.md`.
-
-## Repo layout

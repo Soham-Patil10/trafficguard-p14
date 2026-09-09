@@ -6,9 +6,6 @@ TrafficGuard trains a CNN to read road congestion from traffic-camera images, th
 
 UCD MSc Computer Science group project — Team P14.
 
-> **Live demo:** _TODO — paste your Cloud Run URL_
-> First request after idle takes 10–30s while the models load.
-
 ---
 
 ## Table of contents
@@ -112,7 +109,6 @@ Config (paths, hyperparameters) is overridable via environment variables so the 
 
 Class distribution is imbalanced — roughly 55% Low, 32% Medium, 13% High (see `model/checkpoints/class_distribution.png`).
 
-> The raw dataset is **not** committed. Download it from the link above and point the pipeline at it — see [Getting started](#getting-started).
 
 ---
 
@@ -312,8 +308,6 @@ python train.py
 ```
 Produces `best.pt`, `last.pt`, `train_log.csv`, and the evaluation plots in the output directory. Point the backend at `best.pt` to serve it.
 
-> _TODO: list the exact env-var names from the top of `train.py` so a run is reproducible without reading the source._
-
 ---
 
 ## Deployment
@@ -357,6 +351,3 @@ Full notes in [`DEPLOY.md`](./DEPLOY.md).
 - DeepFool: Moosavi-Dezfooli et al. (2016)
 - Randomised smoothing: Cohen et al., *Certified Adversarial Robustness via Randomized Smoothing* (2019)
 
-## License
-
-_TODO — add a LICENSE file. MIT is the usual choice for a student project; check with your team and module rules first._
